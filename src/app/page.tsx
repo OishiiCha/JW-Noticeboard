@@ -61,6 +61,7 @@ import {
   Layers,
   Lock,
   BookOpen,
+  Mic,
   MoreVertical,
   Share2,
   Code,
@@ -971,14 +972,15 @@ export default function PublicNoticeboard() {
     .sort((a, b) => a.startDate.localeCompare(b.startDate));
 
   const pinnedNotices = notices.filter(n => n.isPinned);
-  const scheduleNotices = notices.filter(n =>
+  // Identify schedule notices by title (not category, since categories may not exist)
+  const isScheduleNotice = (n: Notice) =>
     n.type === "file" && n.fileUrl && n.eventStartDate &&
-    n.category?.name === "Meetings" && !n.isArchived && n.isPublished !== false
-  ).sort((a, b) => (a.eventStartDate || "").localeCompare(b.eventStartDate || ""));
-  const regularNotices = notices.filter(n => !n.isPinned && !(
-    n.type === "file" && n.fileUrl && n.eventStartDate &&
-    n.category?.name === "Meetings" && !n.isArchived && n.isPublished !== false
-  ));
+    n.title.toLowerCase().includes("schedule") && !n.isArchived && n.isPublished !== false;
+  const midweekSchedules = notices.filter(n => isScheduleNotice(n) && n.title.toLowerCase().includes("midweek"))
+    .sort((a, b) => (a.eventStartDate || "").localeCompare(b.eventStartDate || ""));
+  const publicTalkSchedules = notices.filter(n => isScheduleNotice(n) && n.title.toLowerCase().includes("public talk"))
+    .sort((a, b) => (a.eventStartDate || "").localeCompare(b.eventStartDate || ""));
+  const regularNotices = notices.filter(n => !n.isPinned && !isScheduleNotice(n));
   const activeNotifCount = notifications.filter(n => !dismissedNotifIds.has(n.id)).length;
 
   const pushNotification = useCallback((title: string, type: "new" | "updated" = "new") => {
@@ -1591,6 +1593,21 @@ export default function PublicNoticeboard() {
                 </div>
               )}
 
+              {/* Pinned Schedule Strip — current week's meeting + public talk side by side */}
+              {(midweekSchedules.length > 0 || publicTalkSchedules.length > 0) && (
+                <PinnedScheduleStrip
+                  midweekSchedules={midweekSchedules}
+                  publicTalkSchedules={publicTalkSchedules}
+                  language={language}
+                  isAdmin={isAdmin}
+                  onOpenPdf={openPdf}
+                  onOpenPhoto={openPhoto}
+                  onCardClick={setDetailNotice}
+                  onEdit={handleEditNotice}
+                  onDelete={(id) => setDeleteId(id)}
+                />
+              )}
+
               {/* Pinned Notices */}
           {pinnedNotices.filter(filterFn).length > 0 && (
             <DashboardSection
@@ -1626,15 +1643,35 @@ export default function PublicNoticeboard() {
             </DashboardSection>
           )}
 
-          {/* Meeting Schedules */}
-          {scheduleNotices.length > 0 && (
+          {/* Meeting Schedules (Midweek) */}
+          {midweekSchedules.length > 0 && (
             <DashboardSection
               id="schedules"
               title="Meeting Schedules"
               icon={<BookOpen className="h-5 w-5 text-indigo-600" />}
             >
               <ScheduleCarousel
-                schedules={scheduleNotices}
+                schedules={midweekSchedules}
+                language={language}
+                isAdmin={isAdmin}
+                onOpenPdf={openPdf}
+                onOpenPhoto={openPhoto}
+                onCardClick={setDetailNotice}
+                onEdit={handleEditNotice}
+                onDelete={(id) => setDeleteId(id)}
+              />
+            </DashboardSection>
+          )}
+
+          {/* Public Talk Schedules */}
+          {publicTalkSchedules.length > 0 && (
+            <DashboardSection
+              id="public-talks"
+              title="Public Talks"
+              icon={<Mic className="h-5 w-5 text-purple-600" />}
+            >
+              <ScheduleCarousel
+                schedules={publicTalkSchedules}
                 language={language}
                 isAdmin={isAdmin}
                 onOpenPdf={openPdf}
@@ -3466,6 +3503,137 @@ function MeetingCard({ meeting, language, formatDate, onOpenPdf, onOpenPhoto }: 
   );
 }
 
+// ─── Pinned Schedule Strip (current week meeting + public talk) ──
+
+function PinnedScheduleStrip({ midweekSchedules, publicTalkSchedules, language, isAdmin, onOpenPdf, onOpenPhoto, onCardClick, onEdit, onDelete }: {
+  midweekSchedules: Notice[];
+  publicTalkSchedules: Notice[];
+  language: "en" | "tl";
+  isAdmin: boolean;
+  onOpenPdf: (url: string, title: string) => void;
+  onOpenPhoto: (url: string, title: string) => void;
+  onCardClick: (notice: Notice) => void;
+  onEdit: (notice: Notice) => void;
+  onDelete: (id: string) => void;
+}) {
+  const today = new Date().toISOString().split("T")[0];
+
+  // Find current or next upcoming schedule for each type
+  const findCurrent = (schedules: Notice[]) => {
+    const upcoming = schedules
+      .filter(s => (s.eventEndDate || s.eventStartDate || "") >= today)
+      .sort((a, b) => (a.eventStartDate || "").localeCompare(b.eventStartDate || ""));
+    return upcoming[0] || null;
+  };
+
+  const currentMidweek = findCurrent(midweekSchedules);
+  const currentPublicTalk = findCurrent(publicTalkSchedules);
+
+  if (!currentMidweek && !currentPublicTalk) return null;
+
+  const fmtRange = (start: string | null, end: string | null) => {
+    if (!start) return "No date";
+    const sd = new Date(start + "T00:00:00");
+    if (!end || end === start) return sd.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+    const ed = new Date(end + "T00:00:00");
+    return `${sd.toLocaleDateString("en-US", { month: "short", day: "numeric" })} – ${ed.toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
+  };
+
+  const renderScheduleCard = (schedule: Notice | null, type: "midweek" | "public-talk") => {
+    if (!schedule) {
+      return (
+        <div className={`flex-1 rounded-2xl border-2 border-dashed border-border/30 p-4 min-w-0 ${type === "midweek" ? "bg-blue-50/30 dark:bg-blue-950/10" : "bg-purple-50/30 dark:bg-purple-950/10"}`}>
+          <div className="flex items-center gap-2 mb-2">
+            <div className={`h-7 w-7 rounded-lg flex items-center justify-center text-white shrink-0 ${type === "midweek" ? "bg-blue-400" : "bg-purple-400"}`}>
+              {type === "midweek" ? <BookOpen className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
+            </div>
+            <span className="text-sm font-bold">{type === "midweek" ? "Midweek Meeting" : "Public Talk"}</span>
+          </div>
+          <p className="text-xs text-muted-foreground">No schedule uploaded yet</p>
+        </div>
+      );
+    }
+
+    const isToday = (() => {
+      const start = schedule.eventStartDate || "";
+      const end = schedule.eventEndDate || start;
+      return today >= start && today <= end;
+    })();
+
+    return (
+      <div
+        className={`flex-1 rounded-2xl border-2 p-3.5 min-w-0 cursor-pointer hover:shadow-lg transition-all ${isToday ? "border-green-500 shadow-md shadow-green-500/20" : type === "midweek" ? "border-blue-200 dark:border-blue-800/40 bg-blue-50 dark:bg-blue-950/20" : "border-purple-200 dark:border-purple-800/40 bg-purple-50 dark:bg-purple-950/20"}`}
+        onClick={() => onCardClick(schedule)}
+      >
+        <div className="flex items-center gap-2 mb-2">
+          <div className={`h-7 w-7 rounded-lg flex items-center justify-center text-white shrink-0 ${type === "midweek" ? "bg-blue-500" : "bg-purple-500"}`}>
+            {type === "midweek" ? <BookOpen className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-bold leading-tight truncate">
+              {type === "midweek" ? "Midweek Meeting" : "Public Talk"}
+            </p>
+            <p className="text-[11px] text-muted-foreground truncate">
+              {fmtRange(schedule.eventStartDate || null, schedule.eventEndDate || null)}
+              {isToday && <span className="text-green-600 dark:text-green-400 font-bold ml-1">· This week</span>}
+            </p>
+          </div>
+          {isToday && (
+            <span className="shrink-0 px-1.5 py-0.5 rounded-full bg-green-500 text-white text-[9px] font-bold tracking-wide flex items-center gap-1">
+              <span className="h-1 w-1 rounded-full bg-white animate-pulse" />
+              CURRENT
+            </span>
+          )}
+        </div>
+
+        {/* Thumbnail / file link */}
+        {schedule.fileUrl && (
+          <div className="flex items-center gap-2">
+            {isImageFile(schedule.fileUrl, schedule.fileName) && (
+              <LazyImage
+                src={schedule.fileUrl}
+                alt={schedule.title}
+                className="rounded-lg h-16 w-24 object-cover shrink-0"
+              />
+            )}
+            <div className="flex flex-col gap-1 min-w-0">
+              {isPdfFile(schedule.fileUrl, schedule.fileName) ? (
+                <button onClick={(e) => { e.stopPropagation(); onOpenPdf(schedule.fileUrl!, schedule.title); }} className="flex items-center gap-1.5 text-xs text-indigo-600 dark:text-indigo-400 hover:underline font-medium">
+                  <FileText className="h-3.5 w-3.5" />View Schedule
+                </button>
+              ) : (
+                <button onClick={(e) => { e.stopPropagation(); isImageFile(schedule.fileUrl, schedule.fileName) ? onOpenPhoto(schedule.fileUrl!, schedule.title) : onOpenPdf(schedule.fileUrl!, schedule.title); }} className="flex items-center gap-1.5 text-xs text-indigo-600 dark:text-indigo-400 hover:underline font-medium">
+                  <FileText className="h-3.5 w-3.5" />View Schedule
+                </button>
+              )}
+              <a href={schedule.fileUrl} download onClick={(e) => e.stopPropagation()} className="flex items-center gap-1.5 text-xs text-green-600 dark:text-green-400 hover:underline font-medium">
+                <Download className="h-3.5 w-3.5" />Download
+              </a>
+            </div>
+            {isAdmin && (
+              <div className="flex gap-0.5 ml-auto shrink-0">
+                <Button variant="ghost" size="sm" className="h-6 w-6 p-0 rounded-md" onClick={(e) => { e.stopPropagation(); onEdit(schedule); }}>
+                  <Edit className="h-3 w-3" />
+                </Button>
+                <Button variant="ghost" size="sm" className="h-6 w-6 p-0 rounded-md text-red-500" onClick={(e) => { e.stopPropagation(); onDelete(schedule.id); }}>
+                  <Trash2 className="h-3 w-3" />
+                </Button>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <div className="flex flex-col sm:flex-row gap-3">
+      {renderScheduleCard(currentMidweek, "midweek")}
+      {renderScheduleCard(currentPublicTalk, "public-talk")}
+    </div>
+  );
+}
+
 // ─── Schedule Carousel ───────────────────────────────────
 
 function ScheduleCarousel({ schedules, language, isAdmin, onOpenPdf, onOpenPhoto, onCardClick, onEdit, onDelete }: {
@@ -3482,6 +3650,7 @@ function ScheduleCarousel({ schedules, language, isAdmin, onOpenPdf, onOpenPhoto
   const scrollRef = useRef<HTMLDivElement>(null);
   const [itemsPerView, setItemsPerView] = useState(2);
   const [scrollIndex, setScrollIndex] = useState(0);
+  const [cardWidth, setCardWidth] = useState(300);
 
   // Sort by eventStartDate ascending
   const sorted = useMemo(() => {
@@ -3525,19 +3694,16 @@ function ScheduleCarousel({ schedules, language, isAdmin, onOpenPdf, onOpenPhoto
 
   const isMidweek = (s: Notice) => s.title.toLowerCase().includes("midweek");
 
-  // Dynamically calculate items per view
+  // Dynamically calculate items per view based on container width
   useEffect(() => {
     const updateItems = () => {
       if (!scrollRef.current) return;
       const width = scrollRef.current.offsetWidth;
       const isMobile = width < 640;
-      const minCardWidth = isMobile ? Math.min(width, 240) : 240;
-      const maxCardWidth = 420;
+      const cw = isMobile ? Math.min(width, 280) : 300;
       const gap = 12;
-      // Fit based on min card width, but also cap by max card width
-      const fitByMin = Math.max(1, Math.floor((width + gap) / (minCardWidth + gap)));
-      const fitByMax = Math.max(1, Math.floor((width + gap) / (maxCardWidth + gap)));
-      const fit = isMobile ? fitByMin : Math.min(fitByMin, fitByMax);
+      const fit = Math.max(1, Math.floor((width + gap) / (cw + gap)));
+      setCardWidth(cw);
       setItemsPerView(Math.min(fit, visibleSchedules.length || 1));
     };
     updateItems();
@@ -3602,7 +3768,7 @@ function ScheduleCarousel({ schedules, language, isAdmin, onOpenPdf, onOpenPhoto
       <div ref={scrollRef} className="overflow-hidden pt-6 pb-3 -my-3">
         <div
           className="flex gap-3 transition-transform duration-300 ease-out"
-          style={{ transform: `translateX(-${clampedScrollIndex * (100 / itemsPerView)}%)` }}
+          style={{ transform: `translateX(-${clampedScrollIndex * (cardWidth + 12)}px)` }}
         >
           {visibleSchedules.map((schedule) => {
             const midweek = isMidweek(schedule);
@@ -3616,8 +3782,8 @@ function ScheduleCarousel({ schedules, language, isAdmin, onOpenPdf, onOpenPhoto
             return (
               <div
                 key={schedule.id}
-                className="sm:max-w-[420px]"
-                style={{ flex: `0 0 calc(${100 / itemsPerView}% - ${(12 * (itemsPerView - 1)) / itemsPerView}px)` }}
+                className="shrink-0"
+                style={{ width: `min(${cardWidth}px, 100%)` }}
               >
                 <Card
                   onClick={() => onCardClick(schedule)}

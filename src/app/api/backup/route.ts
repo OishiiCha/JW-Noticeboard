@@ -4,7 +4,7 @@ import { requireAdmin, type SessionUser } from "@/lib/auth-api";
 import { logAction } from "@/lib/action-log";
 import { exec } from "child_process";
 import { promisify } from "util";
-import { readFile, writeFile, readdir, stat, mkdir, unlink, access } from "fs/promises";
+import { readFile, writeFile, stat, mkdir, unlink } from "fs/promises";
 import { join } from "path";
 import { randomBytes } from "crypto";
 import { ZipArchive } from "archiver";
@@ -13,24 +13,92 @@ import { Writable } from "stream";
 const execAsync = promisify(exec);
 
 const BACKUP_DIR = join(process.cwd(), "data", "backups");
-const UPLOADS_DIR = join(process.cwd(), "public", "uploads");
 
-// Tables to backup/restore
+// All Prisma models to include in a full backup
 const ALL_TABLES = [
-  "User", "Account", "Session", "Category", "Notice", "Meeting",
-  "SpecialEvent", "SavedLocation", "MeetingOverride", "RoleAssignment",
-  "Bookmark", "UploadedFile", "Setting", "BackupLog", "ActionLog",
+  "User", "Account", "Session", "VerificationToken",
+  "Setting", "Category", "Notice", "NoticeRead",
+  "MeetingSchedule", "SpecialEvent", "SavedLocation", "MeetingOverride",
+  "RoleAssignment", "RoleTemplate",
+  "Bookmark", "UploadedFile",
+  "BackupLog", "ActionLog",
 ];
 
+// Tables to restore (content + users + files — everything except auth sessions
+// which would break the current session). Order matters for FK constraints.
 const RESTORE_TABLES = [
-  "Category", "Notice", "Meeting", "SpecialEvent",
-  "SavedLocation", "MeetingOverride", "RoleAssignment", "Setting",
+  "User", "Account", "VerificationToken",
+  "Setting", "Category", "Notice", "NoticeRead",
+  "MeetingSchedule", "SpecialEvent", "SavedLocation", "MeetingOverride",
+  "RoleAssignment", "RoleTemplate",
+  "Bookmark", "UploadedFile",
+  "BackupLog", "ActionLog",
 ];
+
+// Tables that have Bytes fields that need base64 encode/decode
+const BYTES_FIELDS: Record<string, string[]> = {
+  UploadedFile: ["data"],
+};
+
+// Encode Buffer fields as base64 for JSON serialization
+function encodeBytes(table: string, rows: Record<string, unknown>[]): Record<string, unknown>[] {
+  const fields = BYTES_FIELDS[table];
+  if (!fields) return rows;
+  return rows.map(row => {
+    const out = { ...row };
+    for (const f of fields) {
+      const val = out[f];
+      if (val && typeof val === "object" && "type" in val && (val as { type: string }).type === "Buffer" && Array.isArray((val as unknown as { data: unknown[] }).data)) {
+        out[f] = { __base64: Buffer.from((val as unknown as { data: number[] }).data).toString("base64") };
+      } else if (Buffer.isBuffer(val)) {
+        out[f] = { __base64: val.toString("base64") };
+      } else if (val instanceof Uint8Array) {
+        out[f] = { __base64: Buffer.from(val).toString("base64") };
+      }
+    }
+    return out;
+  });
+}
+
+// Decode base64 back to Buffer for Prisma restore
+function decodeBytes(table: string, rows: Record<string, unknown>[]): Record<string, unknown>[] {
+  const fields = BYTES_FIELDS[table];
+  if (!fields) return rows;
+  return rows.map(row => {
+    const out = { ...row };
+    for (const f of fields) {
+      const val = out[f];
+      if (val && typeof val === "object" && "__base64" in val) {
+        out[f] = Buffer.from((val as { __base64: string }).__base64, "base64");
+      }
+    }
+    return out;
+  });
+}
+
+// Convert Prisma DateTime fields to ISO strings for JSON, and decode BigInt
+function serializeRow(row: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [key, val] of Object.entries(row)) {
+    if (val instanceof Date) {
+      out[key] = val.toISOString();
+    } else if (typeof val === "bigint") {
+      out[key] = val.toString();
+    } else if (Buffer.isBuffer(val)) {
+      out[key] = { type: "Buffer", data: Array.from(val) };
+    } else if (val instanceof Uint8Array) {
+      out[key] = { type: "Buffer", data: Array.from(val) };
+    } else {
+      out[key] = val;
+    }
+  }
+  return out;
+}
 
 export async function GET(request: NextRequest) {
   const userOrResponse = await requireAdmin();
   if (userOrResponse instanceof NextResponse) return userOrResponse;
-  const user = userOrResponse as SessionUser;
+  const _user = userOrResponse as SessionUser;
 
   try {
     // List backup logs + files
@@ -63,8 +131,7 @@ export async function POST(request: NextRequest) {
       const arrayBuffer = await file.arrayBuffer();
       const buffer = Buffer.from(arrayBuffer);
 
-      // Parse the ZIP to extract database.json and uploaded files
-      const { exec } = await import("child_process");
+      // Parse the ZIP to extract database.json
       const tmpDir = join(process.cwd(), "data", "tmp-restore-" + randomBytes(8).toString("hex"));
       await mkdir(tmpDir, { recursive: true });
       const zipPath = join(tmpDir, "upload.zip");
@@ -87,29 +154,9 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: "No database.json found in ZIP" }, { status: 400 });
       }
 
-      // Restore uploaded files
-      const uploadsTmpDir = join(tmpDir, "uploads");
-      try {
-        await access(uploadsTmpDir);
-        for (const subDir of ["notices", "schedules", "events", "roles"]) {
-          const srcDir = join(uploadsTmpDir, subDir);
-          try {
-            const files = await readdir(srcDir);
-            const destDir = join(UPLOADS_DIR, subDir);
-            await mkdir(destDir, { recursive: true });
-            for (const f of files) {
-              try {
-                const srcFile = join(srcDir, f);
-                const destFile = join(destDir, f);
-                const data = await readFile(srcFile);
-                await writeFile(destFile, data);
-              } catch {}
-            }
-          } catch {}
-        }
-      } catch {}
+      await execAsync(`rm -rf "${tmpDir}"`);
 
-      // Restore database tables
+      // Restore database tables (all tables from the ZIP)
       const restored: Record<string, number> = {};
       for (const table of RESTORE_TABLES) {
         const rows = backupData[table] as Record<string, unknown>[];
@@ -117,7 +164,8 @@ export async function POST(request: NextRequest) {
         try {
           // @ts-expect-error dynamic table access
           await db[table.toLowerCase()].deleteMany({});
-          for (const row of rows) {
+          const decoded = decodeBytes(table, rows);
+          for (const row of decoded) {
             try {
               // @ts-expect-error dynamic table access
               await db[table.toLowerCase()].create({ data: row });
@@ -132,14 +180,13 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      await execAsync(`rm -rf "${tmpDir}"`);
       await logAction(user, "restore", "backup", { entityId: "upload", entityName: file.name, details: { restored } });
 
       return NextResponse.json({ success: true, restored });
     }
 
     const body = await request.json();
-    const action = body.action || "create"; // "create" | "restore" | "delete"
+    const action = body.action || "create"; // "create" | "restore" | "delete" | "download" | "download-file"
 
     if (action === "create") {
       // Create a backup by dumping the SQLite DB to JSON
@@ -147,26 +194,17 @@ export async function POST(request: NextRequest) {
       const filename = `backup_${timestamp}.json`;
       const backupPath = join(BACKUP_DIR, filename);
 
-      // Ensure backup directory exists
-      const { mkdir } = await import("fs/promises");
       await mkdir(BACKUP_DIR, { recursive: true });
 
-      // Export all tables to JSON using the DB
-      const tables = [
-        "User", "Account", "Session", "Category", "Notice", "Meeting",
-        "SpecialEvent", "SavedLocation", "MeetingOverride", "RoleAssignment",
-        "Bookmark", "UploadedFile", "Setting",
-      ];
+      const backup: Record<string, unknown> = { _meta: { exportedAt: new Date().toISOString(), version: 2 } };
 
-      const backup: Record<string, unknown> = { _meta: { exportedAt: new Date().toISOString(), version: 1 } };
-
-      for (const table of tables) {
+      for (const table of ALL_TABLES) {
         try {
           // @ts-expect-error dynamic table access
           const rows = await db[table.toLowerCase()].findMany();
-          backup[table] = rows;
+          const serialized = (rows as Record<string, unknown>[]).map(r => serializeRow(r));
+          backup[table] = encodeBytes(table, serialized);
         } catch {
-          // Table might not exist or be empty
           backup[table] = [];
         }
       }
@@ -199,7 +237,7 @@ export async function POST(request: NextRequest) {
       if (!log) return NextResponse.json({ error: "Backup not found" }, { status: 404 });
 
       const backupPath = join(BACKUP_DIR, log.filename);
-      let backupData;
+      let backupData: Record<string, unknown>;
       try {
         const raw = await readFile(backupPath, "utf-8");
         backupData = JSON.parse(raw);
@@ -207,22 +245,17 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: "Backup file not found or corrupted" }, { status: 404 });
       }
 
-      // Restore: only restore content tables (not auth tables to avoid breaking sessions)
-      const restoreTables = [
-        "Category", "Notice", "Meeting", "SpecialEvent",
-        "SavedLocation", "MeetingOverride", "RoleAssignment", "Setting",
-      ];
-
       const restored: Record<string, number> = {};
 
-      for (const table of restoreTables) {
+      for (const table of RESTORE_TABLES) {
         const rows = backupData[table] as Record<string, unknown>[];
         if (!rows || !Array.isArray(rows)) continue;
 
         try {
           // @ts-expect-error dynamic table access
           await db[table.toLowerCase()].deleteMany({});
-          for (const row of rows) {
+          const decoded = decodeBytes(table, rows);
+          for (const row of decoded) {
             try {
               // @ts-expect-error dynamic table access
               await db[table.toLowerCase()].create({ data: row });
@@ -243,7 +276,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (action === "download") {
-      // Create a full backup ZIP (database JSON + all uploaded files)
+      // Create a full backup ZIP (database JSON with all tables + all file BLOBs)
       const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
       const backup: Record<string, unknown> = { _meta: { exportedAt: new Date().toISOString(), version: 2 } };
 
@@ -251,7 +284,8 @@ export async function POST(request: NextRequest) {
         try {
           // @ts-expect-error dynamic table access
           const rows = await db[table.toLowerCase()].findMany();
-          backup[table] = rows;
+          const serialized = (rows as Record<string, unknown>[]).map(r => serializeRow(r));
+          backup[table] = encodeBytes(table, serialized);
         } catch {
           backup[table] = [];
         }
@@ -259,23 +293,8 @@ export async function POST(request: NextRequest) {
 
       const archive = new ZipArchive({ zlib: { level: 6 } });
 
-      // Add database JSON
+      // Add database JSON (includes all tables with file BLOBs as base64)
       archive.append(JSON.stringify(backup, null, 2), { name: "database.json" });
-
-      // Add all uploaded files
-      for (const subDir of ["notices", "schedules", "events", "roles"]) {
-        const dirPath = join(UPLOADS_DIR, subDir);
-        try {
-          const files = await readdir(dirPath);
-          for (const f of files) {
-            try {
-              const fp = join(dirPath, f);
-              const data = await readFile(fp);
-              archive.append(data, { name: `uploads/${subDir}/${f}` });
-            } catch {}
-          }
-        } catch {}
-      }
 
       const chunks: Buffer[] = [];
       const writable = new Writable({
@@ -308,7 +327,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (action === "restore-upload") {
-      // Restore from uploaded ZIP (database.json + uploads/)
+      // Restore from uploaded ZIP (database.json)
       const { backupData } = body;
       if (!backupData) return NextResponse.json({ error: "backupData required" }, { status: 400 });
 
@@ -323,7 +342,8 @@ export async function POST(request: NextRequest) {
         try {
           // @ts-expect-error dynamic table access
           await db[table.toLowerCase()].deleteMany({});
-          for (const row of rows) {
+          const decoded = decodeBytes(table, rows);
+          for (const row of decoded) {
             try {
               // @ts-expect-error dynamic table access
               await db[table.toLowerCase()].create({ data: row });
@@ -358,23 +378,8 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: "Backup file not found on disk" }, { status: 404 });
       }
 
-      // Build a ZIP with the database JSON + all uploaded files
       const archive = new ZipArchive({ zlib: { level: 6 } });
       archive.append(jsonStr, { name: "database.json" });
-
-      for (const subDir of ["notices", "schedules", "events", "roles"]) {
-        const dirPath = join(UPLOADS_DIR, subDir);
-        try {
-          const files = await readdir(dirPath);
-          for (const f of files) {
-            try {
-              const fp = join(dirPath, f);
-              const data = await readFile(fp);
-              archive.append(data, { name: `uploads/${subDir}/${f}` });
-            } catch {}
-          }
-        } catch {}
-      }
 
       const chunks: Buffer[] = [];
       const writable = new Writable({
@@ -414,9 +419,7 @@ export async function POST(request: NextRequest) {
       const log = await db.backupLog.findUnique({ where: { id: backupId } });
       if (!log) return NextResponse.json({ error: "Backup not found" }, { status: 404 });
 
-      // Delete file
       try {
-        const { unlink } = await import("fs/promises");
         await unlink(join(BACKUP_DIR, log.filename));
       } catch {}
 

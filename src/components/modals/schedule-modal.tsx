@@ -338,14 +338,14 @@ export function ScheduleModal({ open, onClose, onSaved, variant, categories }: S
             )}
           </div>
 
-          {fileUrl && (
+          {(manualText || fileUrl) && (
             <div className="space-y-2">
-              <Label className="text-xs font-semibold text-muted-foreground">Paste schedule text (optional)</Label>
+              <Label className="text-xs font-semibold text-muted-foreground">Schedule text {fileUrl ? "(optional)" : ""}</Label>
               <Textarea
                 value={manualText}
                 onChange={(e) => setManualText(e.target.value)}
                 rows={4}
-                placeholder="Paste the schedule text here. It will be split into per-meeting entries for each selected week."
+                placeholder="Paste the schedule text here, or use AI Prompt & Paste above. It will be split into per-meeting entries for each selected week."
                 className="rounded-lg text-xs font-mono"
               />
               {meetingEntries.length > 0 && (
