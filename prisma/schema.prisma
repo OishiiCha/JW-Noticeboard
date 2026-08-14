@@ -1,0 +1,322 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ==================== AUTH ====================
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String @id @default(cuid())
+  sessionToken String @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  username      String    @unique
+  email         String    @default("") @unique
+  emailVerified DateTime?
+  password      String?
+  image         String?
+  role          String    @default("user") // "super_admin" | "admin" | "user"
+  permissions   String    @default("") // JSON array: [{ id: "notices"|"meetings"|"events", access: "r"|"rw" }] (only for role="user")
+  isActive      Boolean   @default(true)
+  mustChangePassword Boolean @default(false)
+  tempPassword  String?   // plaintext temporary password, visible to super admin until the user changes it
+  interfaceLanguage String @default("en") // "en" | "tl"
+  tokenVersion   Int      @default(0)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  accounts    Account[]
+  sessions    Session[]
+}
+
+// ==================== SETTINGS ====================
+
+model Setting {
+  id    String @id @default(cuid())
+  key   String @unique
+  value String // JSON string
+}
+
+// ==================== NOTICEBOARD ====================
+
+model Category {
+  id          String   @id @default(cuid())
+  name        String
+  nameTl      String?  // Tagalog name
+  slug        String   @unique
+  icon        String?  // lucide icon name
+  color       String?  // tailwind color class
+  description String?
+  sortOrder   Int      @default(0)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  notices Notice[]
+}
+
+model Notice {
+  id          String   @id @default(cuid())
+  title       String
+  titleTl     String?  // Tagalog title
+  description String?
+  descriptionTl String?
+  type        String   @default("text") // "text" | "pdf" | "image" | "link"
+  content     String?  // text content or link URL
+  fileUrl     String?  // uploaded file URL
+  fileName    String?  // original file name
+  thumbnailUrl String? // thumbnail for PDF/image
+  linkUrl     String?  // external link URL
+  linkIcon    String?  // icon/logo URL for link
+  linkLabel   String?  // display label for link
+  galleryUrls String?  // comma-separated additional image URLs for photo galleries
+  isPinned    Boolean  @default(false)
+  isPublished Boolean  @default(true)
+  isPublic    Boolean  @default(true)
+  isArchived  Boolean  @default(false)
+  archivedAt  DateTime?
+  audience    String   @default("all") // "all" | "elders" | "ms" | "publishers"
+  showOnCalendar Boolean @default(false)
+  eventStartDate String?  // YYYY-MM-DD for date range attachment
+  eventEndDate   String?  // YYYY-MM-DD (null for single-day)
+  expiresAt   DateTime?
+  pinExpiresAt DateTime? // when the pin expires (auto-unpin)
+  publishAt   DateTime? // scheduled publish time
+  approvalStatus String @default("approved") // "approved" | "pending" | "rejected"
+  approvedBy  String?
+  approvedAt  DateTime?
+  rejectionReason String?
+  location    String?  // location name e.g. "Kingdom Hall"
+  latitude    Float?
+  longitude   Float?
+  categoryId  String?
+  createdBy   String?
+  language    String   @default("en") // "en" | "tl" | "both"
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  deletedAt   DateTime? // soft delete
+
+  category Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  readBy   NoticeRead[]
+
+  @@index([isPublished, isPinned])
+  @@index([categoryId])
+  @@index([deletedAt])
+  @@index([approvalStatus])
+  @@index([isArchived])
+}
+
+model NoticeRead {
+  id        String   @id @default(cuid())
+  noticeId  String
+  userId    String
+  readAt    DateTime @default(now())
+
+  notice    Notice   @relation(fields: [noticeId], references: [id], onDelete: Cascade)
+
+  @@unique([noticeId, userId])
+  @@index([noticeId])
+}
+
+// ==================== MEETING SCHEDULE ====================
+
+model MeetingSchedule {
+  id            String   @id @default(cuid())
+  meetingType   String   // "midweek" | "weekend"
+  date          String   // YYYY-MM-DD
+  time          String   // HH:mm
+  location      String?  // e.g. "Kingdom Hall"
+  scheduleFileUrl String?  // uploaded PDF URL
+  scheduleFileName String? // original file name
+  notes         String?
+  isPublished   Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([date])
+  @@index([meetingType])
+  @@index([isPublished])
+}
+
+// ==================== SPECIAL EVENTS ====================
+
+model SpecialEvent {
+  id          String   @id @default(cuid())
+  title       String
+  titleTl     String?  // Tagalog translation
+  type        String   @default("convention") // "convention" | "co_visit" | "assembly" | "memorial" | "other"
+  startDate   String   // YYYY-MM-DD
+  endDate     String?  // YYYY-MM-DD (null for single-day)
+  location    String?
+  latitude    Float?
+  longitude   Float?
+  description String?
+  imageUrl    String?
+  color       String?  // tailwind color for calendar display
+  zoomId       String?  // Zoom meeting ID
+  zoomPasscode String?  // Zoom meeting passcode
+  showOnNoticeboard Boolean @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([type])
+  @@index([startDate])
+}
+
+// ==================== SAVED LOCATIONS ====================
+
+model SavedLocation {
+  id          String   @id @default(cuid())
+  name        String   // user-given tag/label
+  address     String
+  latitude    Float
+  longitude   Float
+  createdAt   DateTime @default(now())
+}
+
+// ==================== MEETING OVERRIDES ====================
+
+model MeetingOverride {
+  id          String   @id @default(cuid())
+  date        String   // YYYY-MM-DD
+  meetingType String   @default("midweek") // "midweek" | "weekend"
+  originalDay Int?     // original day of week (0-6)
+  overrideDay Int?     // new day of week (0-6), null if cancelled
+  overrideTime String? // new time HH:mm
+  isCancelled Boolean  @default(false)
+  reason      String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([date, meetingType])
+}
+
+// ==================== ROLE ASSIGNMENTS ====================
+
+model RoleAssignment {
+  id          String   @id @default(cuid())
+  title       String   // e.g. "Midweek Meeting — Week of July 1"
+  meetingType String   @default("midweek") // "midweek" | "weekend" | "special"
+  weekDate    String?  // YYYY-MM-DD (Monday of that week)
+  fileUrl     String?  // uploaded image/PDF URL
+  fileName    String?  // original file name
+  ocrText     String?  // Role assignment text (manually entered or pasted from AI output)
+  ocrStatus   String   @default("none") // Legacy field, kept for compatibility
+  isPublished Boolean  @default(true)
+  showOnNoticeboard Boolean @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([meetingType])
+  @@index([weekDate])
+  @@index([isPublished])
+}
+
+model RoleTemplate {
+  id          String   @id @default(cuid())
+  name        String   // e.g. "Standard Midweek Roles"
+  meetingType String   @default("midweek") // "midweek" | "weekend"
+  template    String   // the roles text template
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// ==================== BOOKMARKS ====================
+
+model Bookmark {
+  id        String   @id @default(cuid())
+  userId    String
+  noticeId  String
+  createdAt DateTime @default(now())
+
+  @@unique([userId, noticeId])
+  @@index([userId])
+}
+
+// ==================== UPLOADED FILES ====================
+
+model UploadedFile {
+  id          String   @id @default(cuid())
+  originalName String  // original filename from user
+  storedName  String   // auto-generated unique name
+  mimeType    String   // e.g. image/jpeg, application/pdf
+  size        Int      // file size in bytes
+  folder      String   @default("notices") // notices, events, roles, schedules, images
+  data        Bytes    // file content stored as BLOB
+  uploadedBy  String?
+  createdAt   DateTime @default(now())
+
+  @@index([folder])
+  @@index([createdAt])
+}
+
+// ==================== BACKUP LOGS ====================
+
+model BackupLog {
+  id          String   @id @default(cuid())
+  filename    String   // backup file name
+  size        Int      // file size in bytes
+  type        String   @default("manual") // "manual" | "scheduled"
+  status      String   @default("success") // "success" | "failed"
+  createdBy   String?  // user email for manual, null for scheduled
+  createdAt   DateTime @default(now())
+
+  @@index([createdAt])
+}
+
+// ==================== ACTION LOGS ====================
+
+model ActionLog {
+  id          String   @id @default(cuid())
+  userId      String?
+  userEmail   String?
+  userRole    String?
+  action      String   // "create" | "update" | "delete" | "login" | "logout" | "backup" | "restore"
+  module      String   // "notices" | "events" | "meetings" | "settings" | "users" | "files" | "roles" | "backup"
+  entityId    String?  // ID of affected entity
+  entityName  String?  // human-readable name/title
+  details     String?  // JSON string of additional details
+  createdAt   DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([module])
+  @@index([userId])
+}

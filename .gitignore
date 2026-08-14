@@ -1,0 +1,10 @@
+.env
+node_modules/
+.next/
+data/
+uploads/
+*.db
+
+# Ollama model directories (root-owned, not part of app)
+ollama-*-models/
+ollama-*-entrypoint.sh
