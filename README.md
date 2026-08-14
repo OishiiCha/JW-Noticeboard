@@ -93,10 +93,13 @@ A standalone digital noticeboard application for congregations — built with Ne
 # 1. Create a .env file from the template
 cp .env.example .env  # then edit values
 
-# 2. Build and run
-docker compose up -d --build
+# 2. Build the image with buildx (fast, cached)
+./build.sh
 
-# 3. Open the app
+# 3. Start the container (uses the pre-built image)
+docker compose up -d
+
+# 4. Open the app
 #    http://localhost:2424
 ```
 
@@ -275,8 +278,11 @@ The `docker-compose.yml` is configured for production:
 - Auto-restarts unless stopped
 
 ```bash
-# Build and start
-docker compose up -d --build
+# Build the image (uses buildx with GHA cache)
+./build.sh
+
+# Start the container (uses the pre-built image, no rebuild)
+docker compose up -d
 
 # View logs
 docker compose logs -f
@@ -286,7 +292,8 @@ docker compose down
 
 # Update to a new version
 git pull
-docker compose up -d --build
+./build.sh
+docker compose up -d
 ```
 
 ### Fast builds with buildx (recommended)
@@ -345,13 +352,16 @@ docker buildx build --platform linux/amd64,linux/arm64 --push -t myregistry/noti
 The Dockerfile is multi-arch (AMD64 + ARM64) and optimized for Raspberry Pi 5. Build on the Pi directly:
 
 ```bash
-docker compose up -d --build
+./build.sh
+docker compose up -d
 ```
 
 Or use buildx for cross-compilation from another machine:
 
 ```bash
-docker buildx build --platform linux/arm64 --cache-to type=gha --cache-from type=gha -t noticeboard-app:latest .
+PLATFORM=linux/arm64 ./build.sh
+# Then load the image on the Pi and run:
+docker compose up -d
 ```
 
 ### Netlify
