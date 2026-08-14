@@ -41,6 +41,7 @@ export async function POST(request: NextRequest) {
         password: await hash(newPassword, 12),
         tempPassword: null, // temp password consumed — no longer visible to super admin
         mustChangePassword: false,
+        tokenVersion: { increment: 1 }, // invalidate all existing sessions
       },
     });
 

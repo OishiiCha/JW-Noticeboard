@@ -1,4 +1,11 @@
 .env
+.env.local
+.env.*.local
+# .env.example is NOT ignored — it's tracked as a template
+
+# Windows Zone.Identifier metadata files
+*:Zone.Identifier
+*Zone.Identifier
 node_modules/
 .next/
 data/

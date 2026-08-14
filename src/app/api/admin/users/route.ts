@@ -45,8 +45,15 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Username and password are required" }, { status: 400 });
     }
 
+    // Only super_admin can create super_admin; new users default to "admin"
+    const assignedRole = role === "super_admin" ? "super_admin" : "admin";
+
+    // Email is optional — use a unique placeholder if not provided
+    const finalEmail = email && email.trim() ? email.trim() : `${username}@local`;
+
+    // Only check for duplicate email if one was provided
     const existing = await db.user.findFirst({
-      where: { OR: [{ username }, { email: email || "" }] },
+      where: email && email.trim() ? { OR: [{ username }, { email: email.trim() }] } : { username },
     });
     if (existing) {
       return NextResponse.json({ error: "Username or email already exists" }, { status: 409 });
@@ -59,9 +66,9 @@ export async function POST(request: NextRequest) {
       data: {
         name: name || username,
         username,
-        email: email || `${username}@local`,
+        email: finalEmail,
         password: hashedPassword,
-        role: role || "user",
+        role: assignedRole,
         permissions: typeof permissions === "string" ? permissions : JSON.stringify(permissions || []),
         isActive: true,
         mustChangePassword: !!tempPassword,
