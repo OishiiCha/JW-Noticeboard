@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
-import { X, Loader2, BookOpen, Mic, ClipboardPaste, ChevronDown, ChevronUp, Copy, AlertTriangle, Calendar, Trash2 } from "lucide-react";
+import { X, Loader2, BookOpen, Mic, ClipboardPaste, ChevronDown, ChevronUp, Copy, AlertTriangle, Calendar, Trash2, Wand2 } from "lucide-react";
 import { FileUploadZone } from "@/components/shared/file-upload-zone";
 import { WeekSelector } from "@/components/shared/week-selector";
 import { AdvancedOptions, type AdvancedOptionsState } from "@/components/shared/advanced-options";
@@ -18,6 +18,7 @@ interface ScheduleModalProps {
   onSaved: () => void;
   variant: "midweek" | "public-talk";
   categories: { id: string; name: string }[];
+  aiEnabled?: boolean;
 }
 
 function toYMD(d: Date): string {
@@ -112,7 +113,7 @@ function snapToMeetingDay(dateStr: string, meetingDay: number): string {
   return toYMD(d);
 }
 
-export function ScheduleModal({ open, onClose, onSaved, variant, categories }: ScheduleModalProps) {
+export function ScheduleModal({ open, onClose, onSaved, variant, categories, aiEnabled }: ScheduleModalProps) {
   const { toast } = useToast();
   const [fileUrl, setFileUrl] = useState<string | null>(null);
   const [fileName, setFileName] = useState<string | null>(null);
@@ -128,6 +129,7 @@ export function ScheduleModal({ open, onClose, onSaved, variant, categories }: S
   const [manualText, setManualText] = useState("");
   const [showAiPaste, setShowAiPaste] = useState(false);
   const [aiPasteText, setAiPasteText] = useState("");
+  const [aiProcessing, setAiProcessing] = useState(false);
 
   // AI-parsed entries with their own dates (like roles modal)
   const [aiEntries, setAiEntries] = useState<MeetingEntry[]>([]);
@@ -247,6 +249,62 @@ export function ScheduleModal({ open, onClose, onSaved, variant, categories }: S
 
   const removeEntry = (idx: number) => {
     setAiEntries(prev => prev.filter((_, i) => i !== idx));
+  };
+
+  const autoProcessWithAi = async () => {
+    if (!fileUrl) {
+      toast({ title: "Please upload a schedule image first", variant: "destructive" });
+      return;
+    }
+    setAiProcessing(true);
+    try {
+      const res = await fetch("/api/ai-process", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ imageUrl: fileUrl, prompt: aiPromptTemplate }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        toast({ title: data.error || "AI processing failed", variant: "destructive" });
+        return;
+      }
+      const data = await res.json();
+      const result = data.result || "";
+      // Strip markdown code fences if present
+      let cleanText = result.trim();
+      cleanText = cleanText.replace(/^```(?:json)?\s*\n?/i, "").replace(/\n?```\s*$/i, "").trim();
+      setAiPasteText(cleanText);
+      // Auto-parse the result
+      try {
+        const parsed = JSON.parse(cleanText);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          // Use the same parsing logic as parseAiOutput
+          const parsedEntries: MeetingEntry[] = parsed.map((obj: Record<string, string>) => {
+            const dateStr = obj.Date || obj.date || "";
+            const parsedDate = parseDateFromText(dateStr) || dateStr;
+            const color = obj.Color || obj.color || null;
+            const fields = Object.entries(obj)
+              .filter(([k]) => k.toLowerCase() !== "date" && k.toLowerCase() !== "color")
+              .map(([k, v]) => ({ key: k, value: String(v || "") }));
+            const content = fields.map(f => f.value.trim() ? `${f.key}: ${f.value}` : f.key).join("\n");
+            return { date: parsedDate, content, fields, color };
+          });
+          parsedEntries.sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+          setAiEntries(parsedEntries);
+          setEntriesFromAi(true);
+          setShowAiPaste(true);
+          toast({ title: `AI processed ${parsedEntries.length} entr${parsedEntries.length === 1 ? "y" : "ies"}!` });
+        } else {
+          toast({ title: "AI returned unexpected format", variant: "destructive" });
+        }
+      } catch {
+        toast({ title: "AI returned invalid JSON", variant: "destructive" });
+      }
+    } catch {
+      toast({ title: "Failed to connect to AI service", variant: "destructive" });
+    } finally {
+      setAiProcessing(false);
+    }
   };
 
   const parseAiOutput = () => {
@@ -519,6 +577,29 @@ export function ScheduleModal({ open, onClose, onSaved, variant, categories }: S
             </button>
             {showAiPaste && (
               <div className="space-y-3 rounded-xl border border-border/40 p-3 bg-muted/10">
+                {/* Auto-process with AI (only if Gemini API key is configured) */}
+                {aiEnabled && fileUrl && (
+                  <Button
+                    size="sm"
+                    className="rounded-lg w-full bg-gradient-to-r from-teal-600 to-cyan-600 hover:from-teal-700 hover:to-cyan-700 text-white"
+                    onClick={autoProcessWithAi}
+                    disabled={aiProcessing}
+                  >
+                    {aiProcessing ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5 mr-1.5" />}
+                    {aiProcessing ? "Processing with AI..." : "Auto-Process with AI"}
+                  </Button>
+                )}
+                {aiEnabled && !fileUrl && (
+                  <p className="text-xs text-muted-foreground text-center">Upload a schedule image to enable AI auto-processing.</p>
+                )}
+                {/* Divider between auto and manual */}
+                {aiEnabled && (
+                  <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+                    <div className="flex-1 h-px bg-border/40" />
+                    OR MANUAL
+                    <div className="flex-1 h-px bg-border/40" />
+                  </div>
+                )}
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex-1">
                     <p className="text-xs text-muted-foreground mb-1">
@@ -532,12 +613,46 @@ export function ScheduleModal({ open, onClose, onSaved, variant, categories }: S
                 <Button
                   variant="outline"
                   size="sm"
-                  className="rounded-lg w-full"
-                  onClick={() => {
-                    navigator.clipboard.writeText(aiPromptTemplate).then(() => toast({ title: "AI prompt copied to clipboard" }));
+                  className="rounded-lg w-full bg-teal-50 dark:bg-teal-950/20 border-teal-200 dark:border-teal-800/40 text-teal-700 dark:text-teal-300 hover:bg-teal-100 dark:hover:bg-teal-950/30"
+                  onClick={async () => {
+                    if (!fileUrl) {
+                      navigator.clipboard.writeText(aiPromptTemplate).then(() => toast({ title: "AI prompt copied to clipboard" }));
+                      return;
+                    }
+                    try {
+                      const absoluteUrl = fileUrl.startsWith("http") ? fileUrl : `${window.location.origin}${fileUrl.startsWith("/") ? "" : "/"}${fileUrl}`;
+                      const imgRes = await fetch(absoluteUrl);
+                      if (!imgRes.ok) throw new Error("Failed to fetch image");
+                      let imgBlob = await imgRes.blob();
+                      if (imgBlob.type !== "image/png") {
+                        const bitmap = await createImageBitmap(imgBlob);
+                        const canvas = document.createElement("canvas");
+                        canvas.width = bitmap.width;
+                        canvas.height = bitmap.height;
+                        const ctx = canvas.getContext("2d");
+                        if (!ctx) throw new Error("Canvas not supported");
+                        ctx.drawImage(bitmap, 0, 0);
+                        imgBlob = await new Promise<Blob>((resolve, reject) => {
+                          canvas.toBlob(b => b ? resolve(b) : reject(new Error("toBlob failed")), "image/png");
+                        });
+                      }
+                      if (navigator.clipboard && window.ClipboardItem) {
+                        const clipboardItem = new ClipboardItem({
+                          "text/plain": new Blob([aiPromptTemplate], { type: "text/plain" }),
+                          "image/png": imgBlob,
+                        });
+                        await navigator.clipboard.write([clipboardItem]);
+                        toast({ title: "AI prompt + image copied to clipboard!", description: "Paste into your AI chat (Ctrl+V / Cmd+V)" });
+                      } else {
+                        await navigator.clipboard.writeText(aiPromptTemplate);
+                        toast({ title: "AI prompt copied (image not supported on this browser)", description: "Attach the image manually in your AI chat" });
+                      }
+                    } catch {
+                      navigator.clipboard.writeText(aiPromptTemplate).then(() => toast({ title: "AI prompt copied to clipboard", description: "Attach the image manually in your AI chat" }));
+                    }
                   }}
                 >
-                  <Copy className="h-3.5 w-3.5 mr-1" /> Copy AI Prompt
+                  <Copy className="h-3.5 w-3.5 mr-1" /> Copy for AI (prompt + image)
                 </Button>
                 <div className="space-y-1.5">
                   <Label className="text-xs font-semibold text-muted-foreground">Paste AI JSON Output Here</Label>

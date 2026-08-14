@@ -14,7 +14,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Loader2, Save, ShieldAlert, Clock, Users, CalendarDays, MapPin, Building2, XCircle, CalendarX, Trash2, Plus, Copy, Lock, Video } from "lucide-react";
+import { Loader2, Save, ShieldAlert, Clock, Users, CalendarDays, MapPin, Building2, XCircle, CalendarX, Trash2, Plus, Copy, Lock, Video, Wand2 } from "lucide-react";
 import { t } from "@/lib/i18n";
 import type { Language } from "@/lib/i18n";
 import { useToast } from "@/hooks/use-toast";
@@ -76,6 +76,8 @@ export function SettingsPanel({ language = "en", section = "all", onSaved }: { l
   const [sideBarColor, setSideBarColor] = useState("");
   const [noticeboardPasscode, setNoticeboardPasscode] = useState("");
   const [siteDomain, setSiteDomain] = useState("");
+  const [geminiApiKey, setGeminiApiKey] = useState("");
+  const [showAiGuide, setShowAiGuide] = useState(false);
   const [defaultZoomId, setDefaultZoomId] = useState("");
   const [defaultZoomPasscode, setDefaultZoomPasscode] = useState("");
   const [roleEntries, setRoleEntries] = useState<{ name: string; count: number }[]>([
@@ -117,6 +119,7 @@ export function SettingsPanel({ language = "en", section = "all", onSaved }: { l
         if (data.sideBarColor !== undefined) setSideBarColor(String(data.sideBarColor));
         if (data.noticeboardPasscode !== undefined) setNoticeboardPasscode(String(data.noticeboardPasscode));
         if (data.siteDomain !== undefined) setSiteDomain(String(data.siteDomain));
+        if (data.geminiApiKey !== undefined) setGeminiApiKey(String(data.geminiApiKey));
         if (data.defaultZoomId !== undefined) setDefaultZoomId(String(data.defaultZoomId));
         if (data.defaultZoomPasscode !== undefined) setDefaultZoomPasscode(String(data.defaultZoomPasscode));
         if (data.roleEntries !== undefined) {
@@ -161,6 +164,7 @@ export function SettingsPanel({ language = "en", section = "all", onSaved }: { l
           sideBarColor,
           noticeboardPasscode,
           siteDomain,
+          geminiApiKey,
           defaultZoomId,
           defaultZoomPasscode,
           roleEntries,
@@ -449,6 +453,113 @@ export function SettingsPanel({ language = "en", section = "all", onSaved }: { l
             <p className="text-[11px] text-muted-foreground mt-2">
               When set, anyone visiting the noticeboard who is not logged in will be asked to enter this passcode.
             </p>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* AI / Gemini API Key — shown in display section */}
+      {(showAll || section === "display") && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Wand2 className="h-5 w-5 text-teal-600" />
+              AI Image Processing (Gemini)
+            </CardTitle>
+            <p className="text-xs text-muted-foreground">
+              Optional: Add a free Google Gemini API key to enable automatic AI processing of schedule images. Get a free key at{" "}
+              <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer" className="text-teal-600 hover:underline">
+                aistudio.google.com/apikey
+              </a>
+            </p>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <Input
+              type="password"
+              value={geminiApiKey}
+              onChange={(e) => setGeminiApiKey(e.target.value)}
+              placeholder="Leave empty to disable AI auto-processing"
+              className="rounded-lg"
+            />
+            <p className="text-[11px] text-muted-foreground">
+              When set, schedule modals will show an "Auto-Process with AI" button that sends the image directly to Gemini and fills in the fields automatically. When empty, only the manual copy-paste method is available.
+            </p>
+
+            {/* Setup Guide */}
+            <button
+              type="button"
+              onClick={() => setShowAiGuide(!showAiGuide)}
+              className="flex items-center gap-1.5 text-xs font-medium text-teal-600 dark:text-teal-400 hover:underline transition-colors"
+            >
+              {showAiGuide ? "Hide" : "Show"} Setup Guide
+            </button>
+            {showAiGuide && (
+              <div className="rounded-xl border border-border/40 bg-muted/20 p-4 space-y-4 text-sm">
+                {/* What it does */}
+                <div className="space-y-1.5">
+                  <p className="font-semibold text-foreground">What does this do?</p>
+                  <p className="text-muted-foreground text-xs leading-relaxed">
+                    This feature lets you upload a schedule image (Midweek Meeting or Public Talk) and have AI automatically read the image and fill in all the fields — speaker names, chairmen, prayers, talk themes, etc. — without manually typing anything.
+                  </p>
+                </div>
+
+                {/* Step 1 */}
+                <div className="space-y-1.5">
+                  <p className="font-semibold text-foreground">Step 1 — Get a free API key</p>
+                  <ol className="text-xs text-muted-foreground leading-relaxed space-y-1 list-decimal list-inside">
+                    <li>Go to{" "}
+                      <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer" className="text-teal-600 hover:underline font-medium">
+                        aistudio.google.com/apikey
+                      </a>
+                    </li>
+                    <li>Sign in with a Google account</li>
+                    <li>Click <span className="font-medium text-foreground">"Create API Key"</span></li>
+                    <li>Copy the generated key (starts with <span className="font-mono text-foreground">AIza...</span>)</li>
+                  </ol>
+                </div>
+
+                {/* Step 2 */}
+                <div className="space-y-1.5">
+                  <p className="font-semibold text-foreground">Step 2 — Enter the key here</p>
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    Paste the key into the field above and click <span className="font-medium text-foreground">Save</span>. The key is stored securely in the database and never exposed to non-admin users.
+                  </p>
+                </div>
+
+                {/* Step 3 */}
+                <div className="space-y-1.5">
+                  <p className="font-semibold text-foreground">Step 3 — Use it in schedule modals</p>
+                  <ol className="text-xs text-muted-foreground leading-relaxed space-y-1 list-decimal list-inside">
+                    <li>Click <span className="font-medium text-foreground">Add → Midweek Schedule</span> or <span className="font-medium text-foreground">Public Talk Schedule</span></li>
+                    <li>Upload your schedule image</li>
+                    <li>Expand the <span className="font-medium text-foreground">"AI Prompt & Paste"</span> section</li>
+                    <li>Click <span className="font-medium text-teal-600">"Auto-Process with AI"</span></li>
+                    <li>Review the parsed fields and save</li>
+                  </ol>
+                </div>
+
+                {/* Manual fallback */}
+                <div className="space-y-1.5">
+                  <p className="font-semibold text-foreground">Without an API key (manual mode)</p>
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    If you don't add a key, you can still use the manual method:
+                  </p>
+                  <ol className="text-xs text-muted-foreground leading-relaxed space-y-1 list-decimal list-inside">
+                    <li>Click <span className="font-medium text-foreground">"Copy for AI (prompt + image)"</span> — copies both to your clipboard</li>
+                    <li>Paste into any AI chat (ChatGPT, Gemini, Claude, etc.)</li>
+                    <li>Copy the JSON response from the AI</li>
+                    <li>Paste it into the <span className="font-medium text-foreground">"Paste AI JSON Output"</span> field</li>
+                    <li>Click <span className="font-medium text-foreground">"Parse & Fill"</span></li>
+                  </ol>
+                </div>
+
+                {/* Pricing note */}
+                <div className="rounded-lg bg-teal-50 dark:bg-teal-950/20 border border-teal-200 dark:border-teal-800/40 p-3">
+                  <p className="text-xs text-teal-700 dark:text-teal-300 leading-relaxed">
+                    <span className="font-semibold">Free tier limits:</span> Gemini 2.0 Flash allows 15 requests/minute and 1,500 requests/day on the free tier. This is more than enough for processing schedule images. No credit card required.
+                  </p>
+                </div>
+              </div>
+            )}
           </CardContent>
         </Card>
       )}

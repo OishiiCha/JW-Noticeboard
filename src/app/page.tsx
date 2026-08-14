@@ -440,6 +440,7 @@ export default function PublicNoticeboard() {
   const [showEditAiSection, setShowEditAiSection] = useState(false);
   const [editAiPasteText, setEditAiPasteText] = useState("");
   const [editAiCopying, setEditAiCopying] = useState(false);
+  const [editAiProcessing, setEditAiProcessing] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showAddPicker, setShowAddPicker] = useState(false);
   const [showScheduleModal, setShowScheduleModal] = useState<null | "midweek" | "public-talk">(null);
@@ -1943,16 +1944,32 @@ export default function PublicNoticeboard() {
                 const copyForAi = async () => {
                   setEditAiCopying(true);
                   try {
+                    // Resolve the file URL to an absolute URL
+                    const imgUrl = editingNotice.fileUrl!;
+                    const absoluteUrl = imgUrl.startsWith("http") ? imgUrl : `${window.location.origin}${imgUrl.startsWith("/") ? "" : "/"}${imgUrl}`;
                     // Fetch the image as a blob
-                    const imgRes = await fetch(editingNotice.fileUrl!);
-                    const imgBlob = await imgRes.blob();
-                    // Determine MIME type (default to png)
-                    const mime = imgBlob.type || "image/png";
+                    const imgRes = await fetch(absoluteUrl);
+                    if (!imgRes.ok) throw new Error("Failed to fetch image");
+                    let imgBlob = await imgRes.blob();
+                    // ClipboardItem only supports image/png in most browsers — convert if needed
+                    if (imgBlob.type !== "image/png") {
+                      // Re-encode as PNG via canvas
+                      const bitmap = await createImageBitmap(imgBlob);
+                      const canvas = document.createElement("canvas");
+                      canvas.width = bitmap.width;
+                      canvas.height = bitmap.height;
+                      const ctx = canvas.getContext("2d");
+                      if (!ctx) throw new Error("Canvas not supported");
+                      ctx.drawImage(bitmap, 0, 0);
+                      imgBlob = await new Promise<Blob>((resolve, reject) => {
+                        canvas.toBlob(b => b ? resolve(b) : reject(new Error("toBlob failed")), "image/png");
+                      });
+                    }
                     // Try to write both text and image to clipboard
                     if (navigator.clipboard && window.ClipboardItem) {
                       const clipboardItem = new ClipboardItem({
                         "text/plain": new Blob([aiPrompt], { type: "text/plain" }),
-                        [mime]: imgBlob,
+                        "image/png": imgBlob,
                       });
                       await navigator.clipboard.write([clipboardItem]);
                       toast({ title: "AI prompt + image copied to clipboard!", description: "Paste into your AI chat (Ctrl+V / Cmd+V)" });
@@ -2007,6 +2024,59 @@ export default function PublicNoticeboard() {
                   }
                 };
 
+                const autoProcessEditWithAi = async () => {
+                  if (!editingNotice.fileUrl) return;
+                  setEditAiProcessing(true);
+                  try {
+                    const res = await fetch("/api/ai-process", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ imageUrl: editingNotice.fileUrl, prompt: aiPrompt }),
+                    });
+                    if (!res.ok) {
+                      const data = await res.json().catch(() => ({}));
+                      toast({ title: data.error || "AI processing failed", variant: "destructive" });
+                      return;
+                    }
+                    const data = await res.json();
+                    const result = data.result || "";
+                    let cleanText = result.trim();
+                    cleanText = cleanText.replace(/^```(?:json)?\s*\n?/i, "").replace(/\n?```\s*$/i, "").trim();
+                    setEditAiPasteText(cleanText);
+                    // Auto-parse
+                    try {
+                      const parsed = JSON.parse(cleanText);
+                      if (Array.isArray(parsed) && parsed.length > 0) {
+                        const lines: string[] = [];
+                        for (const obj of parsed) {
+                          const dateStr = obj.Date || obj.date || "";
+                          const fields = Object.entries(obj)
+                            .filter(([k]) => k.toLowerCase() !== "date" && k.toLowerCase() !== "color")
+                            .map(([k, v]) => `${k}: ${v || ""}`);
+                          if (dateStr) {
+                            const d = new Date(dateStr + "T00:00:00");
+                            if (!isNaN(d.getTime())) {
+                              lines.push(d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" }));
+                            }
+                          }
+                          lines.push(...fields);
+                          lines.push("");
+                        }
+                        setEditingNotice({ ...editingNotice, content: lines.join("\n").trim() });
+                        toast({ title: `AI processed ${parsed.length} entr${parsed.length === 1 ? "y" : "ies"}!` });
+                      } else {
+                        toast({ title: "AI returned unexpected format", variant: "destructive" });
+                      }
+                    } catch {
+                      toast({ title: "AI returned invalid JSON", variant: "destructive" });
+                    }
+                  } catch {
+                    toast({ title: "Failed to connect to AI service", variant: "destructive" });
+                  } finally {
+                    setEditAiProcessing(false);
+                  }
+                };
+
                 const hasNoContent = !editingNotice.content && !editingNotice.description;
                 return (
                   <div className="space-y-2">
@@ -2022,6 +2092,25 @@ export default function PublicNoticeboard() {
                     </button>
                     {showEditAiSection && (
                       <div className="space-y-3 rounded-xl border border-border/40 p-3 bg-muted/10">
+                        {/* Auto-process with AI (only if Gemini API key is configured) */}
+                        {!!settings.geminiApiKey && (
+                          <Button
+                            size="sm"
+                            className="rounded-lg w-full bg-gradient-to-r from-teal-600 to-cyan-600 hover:from-teal-700 hover:to-cyan-700 text-white"
+                            onClick={autoProcessEditWithAi}
+                            disabled={editAiProcessing}
+                          >
+                            {editAiProcessing ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5 mr-1.5" />}
+                            {editAiProcessing ? "Processing with AI..." : "Auto-Process with AI"}
+                          </Button>
+                        )}
+                        {!!settings.geminiApiKey && (
+                          <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+                            <div className="flex-1 h-px bg-border/40" />
+                            OR MANUAL
+                            <div className="flex-1 h-px bg-border/40" />
+                          </div>
+                        )}
                         <p className="text-xs text-muted-foreground">
                           Copy the AI prompt + schedule image to your clipboard in one action, then paste into an AI chat to get structured JSON.
                         </p>
@@ -2212,6 +2301,7 @@ export default function PublicNoticeboard() {
         onSaved={() => { setShowScheduleModal(null); pushNotification("Schedule saved", "new"); fetchData(); }}
         variant={showScheduleModal === "public-talk" ? "public-talk" : "midweek"}
         categories={categories.map(c => ({ id: c.id, name: c.name }))}
+        aiEnabled={!!settings.geminiApiKey}
       />
       <WeeklyRolesModal
         open={showWeeklyRolesModal}

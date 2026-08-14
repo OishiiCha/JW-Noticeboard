@@ -82,18 +82,18 @@
   --card-foreground: #0F172A;
   --popover: #FFFFFF;
   --popover-foreground: #0F172A;
-  --primary: #06B6D4;
-  --primary-foreground: #0F172A;
+  --primary: #0891B2;
+  --primary-foreground: #FFFFFF;
   --secondary: #F1F5F9;
   --secondary-foreground: #0F172A;
   --muted: #F1F5F9;
-  --muted-foreground: #64748B;
+  --muted-foreground: #475569;
   --accent: #ECFDF5;
   --accent-foreground: #0F172A;
   --destructive: #EF4444;
   --border: #0F172A;
   --input: #E2E8F0;
-  --ring: #06B6D4;
+  --ring: #0891B2;
   --modern-shadow: 4px 4px 0px #0F172A;
   --modern-shadow-sm: 3px 3px 0px #0F172A;
   --modern-shadow-hover: 6px 6px 0px #0F172A;
@@ -154,8 +154,32 @@
 .modern button[class*="bg-amber-"],
 .modern button[class*="bg-orange-"],
 .modern button[class*="bg-cyan-"],
-.modern button[class*="bg-sky-"] {
+.modern button[class*="bg-sky-"],
+.modern a[class*="bg-indigo-"],
+.modern a[class*="bg-teal-"],
+.modern a[class*="bg-green-"],
+.modern a[class*="bg-blue-"],
+.modern a[class*="bg-purple-"],
+.modern a[class*="bg-rose-"],
+.modern a[class*="bg-red-"],
+.modern a[class*="bg-cyan-"],
+.modern a[class*="bg-sky-"],
+.modern .bg-primary {
   color: #FFFFFF;
+}
+
+/* Light pastel backgrounds should have dark text in modern mode */
+.modern [class*="bg-indigo-50"],
+.modern [class*="bg-blue-50"],
+.modern [class*="bg-teal-50"],
+.modern [class*="bg-green-50"],
+.modern [class*="bg-purple-50"],
+.modern [class*="bg-cyan-50"],
+.modern [class*="bg-amber-50"],
+.modern [class*="bg-rose-50"],
+.modern [class*="bg-emerald-50"],
+.modern [class*="bg-sky-50"] {
+  color: #0F172A;
 }
 
 .modern .card-hover:hover {
