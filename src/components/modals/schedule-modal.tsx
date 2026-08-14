@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
-import { X, Loader2, BookOpen, Mic, ClipboardPaste, ChevronDown, ChevronUp, Copy, AlertTriangle, Calendar } from "lucide-react";
+import { X, Loader2, BookOpen, Mic, ClipboardPaste, ChevronDown, ChevronUp, Copy, AlertTriangle, Calendar, Trash2 } from "lucide-react";
 import { FileUploadZone } from "@/components/shared/file-upload-zone";
 import { WeekSelector } from "@/components/shared/week-selector";
 import { AdvancedOptions, type AdvancedOptionsState } from "@/components/shared/advanced-options";
@@ -30,6 +30,48 @@ const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "Ju
 interface MeetingEntry {
   date: string;
   content: string;
+  fields?: { key: string; value: string }[];
+}
+
+// Color mapping for schedule fields
+const FIELD_COLORS: Record<string, { label: string; bg: string; text: string; border: string }> = {
+  Speaker: { label: "Speaker", bg: "bg-blue-100 dark:bg-blue-950/40", text: "text-blue-700 dark:text-blue-300", border: "border-blue-200 dark:border-blue-800/40" },
+  Congregation: { label: "Congregation", bg: "bg-cyan-100 dark:bg-cyan-950/40", text: "text-cyan-700 dark:text-cyan-300", border: "border-cyan-200 dark:border-cyan-800/40" },
+  TalkTheme: { label: "Talk Theme", bg: "bg-indigo-100 dark:bg-indigo-950/40", text: "text-indigo-700 dark:text-indigo-300", border: "border-indigo-200 dark:border-indigo-800/40" },
+  Chairman: { label: "Chairman", bg: "bg-purple-100 dark:bg-purple-950/40", text: "text-purple-700 dark:text-purple-300", border: "border-purple-200 dark:border-purple-800/40" },
+  Prayer: { label: "Prayer", bg: "bg-green-100 dark:bg-green-950/40", text: "text-green-700 dark:text-green-300", border: "border-green-200 dark:border-green-800/40" },
+  WTStudyReader: { label: "WT Study Reader", bg: "bg-amber-100 dark:bg-amber-950/40", text: "text-amber-700 dark:text-amber-300", border: "border-amber-200 dark:border-amber-800/40" },
+  // Midweek meeting fields
+  BibleReading: { label: "Bible Reading", bg: "bg-blue-100 dark:bg-blue-950/40", text: "text-blue-700 dark:text-blue-300", border: "border-blue-200 dark:border-blue-800/40" },
+  TreasuresTalk: { label: "Treasures Talk", bg: "bg-indigo-100 dark:bg-indigo-950/40", text: "text-indigo-700 dark:text-indigo-300", border: "border-indigo-200 dark:border-indigo-800/40" },
+  TreasuresGem: { label: "Treasures Gem", bg: "bg-indigo-100 dark:bg-indigo-950/40", text: "text-indigo-700 dark:text-indigo-300", border: "border-indigo-200 dark:border-indigo-800/40" },
+  ApplyYourself1: { label: "Apply Yourself #1", bg: "bg-teal-100 dark:bg-teal-950/40", text: "text-teal-700 dark:text-teal-300", border: "border-teal-200 dark:border-teal-800/40" },
+  ApplyYourself2: { label: "Apply Yourself #2", bg: "bg-teal-100 dark:bg-teal-950/40", text: "text-teal-700 dark:text-teal-300", border: "border-teal-200 dark:border-teal-800/40" },
+  LivingTalk: { label: "Living Talk", bg: "bg-rose-100 dark:bg-rose-950/40", text: "text-rose-700 dark:text-rose-300", border: "border-rose-200 dark:border-rose-800/40" },
+  CongregationBibleStudy: { label: "Congregation Bible Study", bg: "bg-amber-100 dark:bg-amber-950/40", text: "text-amber-700 dark:text-amber-300", border: "border-amber-200 dark:border-amber-800/40" },
+  Reader: { label: "Reader", bg: "bg-green-100 dark:bg-green-950/40", text: "text-green-700 dark:text-green-300", border: "border-green-200 dark:border-green-800/40" },
+};
+
+const DEFAULT_FIELD_COLOR = { label: "", bg: "bg-slate-100 dark:bg-slate-950/40", text: "text-slate-700 dark:text-slate-300", border: "border-slate-200 dark:border-slate-800/40" };
+
+function getFieldColor(key: string) {
+  return FIELD_COLORS[key] || { ...DEFAULT_FIELD_COLOR, label: key };
+}
+
+// Parse content string "Key: Value\nKey: Value" into structured fields
+function parseFields(content: string): { key: string; value: string }[] {
+  return content.split("\n").map(line => {
+    const idx = line.indexOf(":");
+    if (idx > 0) {
+      return { key: line.slice(0, idx).trim(), value: line.slice(idx + 1).trim() };
+    }
+    return { key: line.trim(), value: "" };
+  }).filter(f => f.key);
+}
+
+// Convert structured fields back to content string
+function fieldsToContent(fields: { key: string; value: string }[]): string {
+  return fields.map(f => f.value.trim() ? `${f.key}: ${f.value}` : f.key).join("\n");
 }
 
 function parseDateFromText(text: string): string | null {
@@ -184,7 +226,7 @@ export function ScheduleModal({ open, onClose, onSaved, variant, categories }: S
 
   const updateEntryContent = (idx: number, content: string) => {
     if (entriesFromAi) {
-      setAiEntries(prev => prev.map((e, i) => i === idx ? { ...e, content } : e));
+      setAiEntries(prev => prev.map((e, i) => i === idx ? { ...e, content, fields: parseFields(content) } : e));
     } else {
       setMeetingEntries(prev => prev.map((e, i) => i === idx ? { ...e, content } : e));
     }
@@ -192,6 +234,14 @@ export function ScheduleModal({ open, onClose, onSaved, variant, categories }: S
 
   const updateEntryDate = (idx: number, date: string) => {
     setAiEntries(prev => prev.map((e, i) => i === idx ? { ...e, date } : e));
+  };
+
+  const updateEntryField = (idx: number, fieldIdx: number, value: string) => {
+    setAiEntries(prev => prev.map((e, i) => {
+      if (i !== idx || !e.fields) return e;
+      const newFields = e.fields.map((f, fi) => fi === fieldIdx ? { ...f, value } : f);
+      return { ...e, fields: newFields, content: fieldsToContent(newFields) };
+    }));
   };
 
   const removeEntry = (idx: number) => {
@@ -203,17 +253,22 @@ export function ScheduleModal({ open, onClose, onSaved, variant, categories }: S
 
     let parsedEntries: MeetingEntry[] = [];
 
+    // Strip markdown code fences if present (```json ... ``` or ``` ... ```)
+    let cleanText = aiPasteText.trim();
+    cleanText = cleanText.replace(/^```(?:json)?\s*\n?/i, "").replace(/\n?```\s*$/i, "").trim();
+
     // Try JSON parsing first
     try {
-      const parsed = JSON.parse(aiPasteText.trim());
+      const parsed = JSON.parse(cleanText);
       if (Array.isArray(parsed) && parsed.length > 0 && typeof parsed[0] === "object") {
         parsedEntries = parsed.map((obj: Record<string, string>) => {
           const dateStr = obj.Date || obj.date || "";
           const parsedDate = parseDateFromText(dateStr) || dateStr;
-          const roleLines = Object.entries(obj)
+          const fields = Object.entries(obj)
             .filter(([k]) => k.toLowerCase() !== "date")
-            .map(([k, v]) => `${k}: ${v}`);
-          return { date: parsedDate, content: roleLines.join("\n") };
+            .map(([k, v]) => ({ key: k, value: String(v || "") }));
+          const content = fields.map(f => f.value.trim() ? `${f.key}: ${f.value}` : f.key).join("\n");
+          return { date: parsedDate, content, fields };
         });
       }
     } catch {
@@ -241,7 +296,8 @@ export function ScheduleModal({ open, onClose, onSaved, variant, categories }: S
         }
       }
       if (currentDate && currentContent.length > 0) {
-        parsedEntries.push({ date: currentDate, content: currentContent.join("\n").trim() });
+        const content = currentContent.join("\n").trim();
+        parsedEntries.push({ date: currentDate, content, fields: parseFields(content) });
       }
     }
 
@@ -475,7 +531,7 @@ export function ScheduleModal({ open, onClose, onSaved, variant, categories }: S
             )}
           </div>
 
-          {/* AI-parsed entries — shown as individual cards with editable dates */}
+          {/* AI-parsed entries — shown as colored cards with structured fields */}
           {entriesFromAi && aiEntries.length > 0 && (
             <div className="space-y-2">
               <div className="flex items-center justify-between">
@@ -494,34 +550,58 @@ export function ScheduleModal({ open, onClose, onSaved, variant, categories }: S
                 const d = entry.date ? new Date(entry.date + "T00:00:00") : null;
                 const dayName = d ? DAY_NAMES[d.getDay()] : "";
                 const isCorrectDay = d && d.getDay() === meetingDay;
+                const dateLabel = d ? d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" }) : "No date";
+                const fields = entry.fields || parseFields(entry.content);
                 return (
-                  <div key={idx} className={`rounded-lg border p-2.5 space-y-2 ${isCorrectDay ? "border-border/40" : "border-amber-300 dark:border-amber-700/50"}`}>
-                    <div className="flex items-center gap-2">
+                  <div key={idx} className={`rounded-2xl border-2 p-3 space-y-2.5 transition-all ${isCorrectDay ? `${isMidweek ? "border-blue-200 dark:border-blue-800/40 bg-blue-50/30 dark:bg-blue-950/10" : "border-purple-200 dark:border-purple-800/40 bg-purple-50/30 dark:bg-purple-950/10"}` : "border-amber-300 dark:border-amber-700/50 bg-amber-50/30 dark:bg-amber-950/10"}`}>
+                    {/* Date header bar */}
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 flex-1 min-w-0">
+                        <div className={`h-8 w-8 rounded-lg flex items-center justify-center text-xs font-bold shrink-0 text-white ${isMidweek ? "bg-blue-500" : "bg-purple-500"}`}>
+                          {isMidweek ? "MW" : "PT"}
+                        </div>
+                        <div className="flex flex-col">
+                          <span className="text-sm font-semibold leading-tight">{dateLabel}</span>
+                          {!isCorrectDay && d && (
+                            <span className="text-[10px] text-amber-600 font-medium">Expected {DAY_NAMES[meetingDay]}</span>
+                          )}
+                        </div>
+                      </div>
                       <Input
                         type="date"
                         value={entry.date}
                         onChange={(e) => updateEntryDate(idx, e.target.value)}
-                        className="rounded-lg text-xs h-8 flex-shrink-0 w-[140px]"
+                        className="rounded-lg text-xs h-8 flex-shrink-0 w-[130px]"
                       />
-                      <span className={`text-xs font-medium ${isCorrectDay ? "text-indigo-600" : "text-amber-600"}`}>
-                        {dayName}{!isCorrectDay && d && ` (expected ${DAY_NAMES[meetingDay]})`}
-                      </span>
                       <Button
                         variant="ghost"
                         size="sm"
-                        className="h-6 w-6 p-0 rounded-md text-muted-foreground hover:text-red-500 ml-auto shrink-0"
+                        className="h-7 w-7 p-0 rounded-lg text-muted-foreground hover:text-red-500 shrink-0"
                         onClick={() => removeEntry(idx)}
                       >
-                        <X className="h-3 w-3" />
+                        <Trash2 className="h-3.5 w-3.5" />
                       </Button>
                     </div>
-                    <Textarea
-                      value={entry.content}
-                      onChange={(e) => updateEntryContent(idx, e.target.value)}
-                      rows={4}
-                      className="rounded-lg text-xs font-mono"
-                      placeholder="Text for this meeting..."
-                    />
+
+                    {/* Structured fields with colors */}
+                    <div className="space-y-1.5">
+                      {fields.map((field, fieldIdx) => {
+                        const colors = getFieldColor(field.key);
+                        return (
+                          <div key={fieldIdx} className={`flex items-center gap-2 rounded-lg border ${colors.border} ${colors.bg} px-2 py-1`}>
+                            <span className={`text-[10px] font-bold uppercase tracking-wide ${colors.text} shrink-0 w-[110px]`}>
+                              {colors.label || field.key}
+                            </span>
+                            <Input
+                              value={field.value}
+                              onChange={(e) => updateEntryField(idx, fieldIdx, e.target.value)}
+                              placeholder="—"
+                              className="rounded-md text-xs h-7 flex-1 min-w-0 border-transparent bg-background/50 focus-visible:border-border"
+                            />
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
                 );
               })}
