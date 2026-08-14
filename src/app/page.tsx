@@ -1149,6 +1149,11 @@ export default function PublicNoticeboard() {
             ))}
           </div>
           <div className="flex items-center gap-1 sm:gap-2 shrink-0 ml-auto">
+            {isAdmin && (
+              <Button onClick={() => setShowAddPicker(true)} className="rounded-xl h-9 w-9 sm:w-auto sm:h-8 p-0 sm:p-2 bg-indigo-600 hover:bg-indigo-700 shrink-0">
+                <Plus className="h-4 w-4 sm:mr-1.5" /><span className="hidden sm:inline">Add</span>
+              </Button>
+            )}
             <div className="relative">
               <Button variant="ghost" size="icon" onClick={() => setShowNotifPanel(o => !o)} className="rounded-xl h-10 w-10 sm:h-9 sm:w-9 relative" title="Notifications">
                 <Bell className="h-[18px] w-[18px]" />
@@ -1781,10 +1786,11 @@ export default function PublicNoticeboard() {
         </button>
         {isAdmin ? (
           <button
-            onClick={() => setShowAddPicker(true)}
-            className="flex items-center justify-center -mt-5 h-14 w-14 rounded-2xl bg-indigo-600 text-white shadow-lg shadow-indigo-600/30 hover:bg-indigo-700 transition-colors shrink-0"
+            onClick={() => document.getElementById("roles")?.scrollIntoView({ behavior: "smooth", block: "start" })}
+            className="flex flex-col items-center gap-0.5 py-2 px-3 text-muted-foreground hover:text-foreground transition-colors min-w-[56px]"
           >
-            <Plus className="h-6 w-6" />
+            <UserCog className="h-5 w-5" />
+            <span className="text-xs font-medium">Roles</span>
           </button>
         ) : (
           <button
@@ -2983,15 +2989,6 @@ export default function PublicNoticeboard() {
         </div>
       )}
 
-      {/* Floating Add Button for admin (desktop only — mobile uses bottom nav FAB) */}
-      {isAdmin && (
-        <button
-          onClick={handleCreateNotice}
-          className="hidden lg:flex fixed bottom-6 right-6 h-14 w-14 rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 text-white shadow-lg shadow-indigo-500/30 hover:scale-110 hover:shadow-xl hover:shadow-indigo-500/40 transition-all items-center justify-center z-40"
-        >
-          <Plus className="h-6 w-6" />
-        </button>
-      )}
     </div>
   );
 }
@@ -3622,6 +3619,24 @@ function PinnedScheduleStrip({ midweekSchedules, publicTalkSchedules, language, 
             )}
           </div>
         )}
+
+        {/* Structured fields as colored blocks */}
+        {(() => {
+          const fields = parseScheduleFields(schedule.content ?? schedule.description ?? null);
+          if (fields.length === 0) return null;
+          return (
+            <div className="space-y-1">
+              {fields.slice(0, 6).map((f, i) => (
+                <div key={i} className={`flex items-center gap-2 rounded-lg ${f.bg} border border-border/30 px-2 py-1`}>
+                  <div className={`w-1 h-4 rounded-full shrink-0 ${f.dot}`} />
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wide leading-none shrink-0">{f.name}</p>
+                  {f.assignee && <p className="text-xs font-medium leading-tight truncate">{f.assignee}</p>}
+                </div>
+              ))}
+              {fields.length > 6 && <p className="text-[10px] text-muted-foreground text-center">+{fields.length - 6} more</p>}
+            </div>
+          );
+        })()}
       </div>
     );
   };
@@ -3635,6 +3650,54 @@ function PinnedScheduleStrip({ midweekSchedules, publicTalkSchedules, language, 
 }
 
 // ─── Schedule Carousel ───────────────────────────────────
+
+// Color mapping for schedule fields on the noticeboard
+const SCHEDULE_FIELD_COLORS: Record<string, { label: string; dot: string; bg: string }> = {
+  Speaker: { label: "Speaker", dot: "bg-blue-500", bg: "bg-blue-50 dark:bg-blue-950/30" },
+  Congregation: { label: "Congregation", dot: "bg-cyan-500", bg: "bg-cyan-50 dark:bg-cyan-950/30" },
+  TalkTheme: { label: "Talk Theme", dot: "bg-indigo-500", bg: "bg-indigo-50 dark:bg-indigo-950/30" },
+  Chairman: { label: "Chairman", dot: "bg-purple-500", bg: "bg-purple-50 dark:bg-purple-950/30" },
+  Prayer: { label: "Prayer", dot: "bg-green-500", bg: "bg-green-50 dark:bg-green-950/30" },
+  WTStudyReader: { label: "WT Study Reader", dot: "bg-amber-500", bg: "bg-amber-50 dark:bg-amber-950/30" },
+  BibleReading: { label: "Bible Reading", dot: "bg-blue-500", bg: "bg-blue-50 dark:bg-blue-950/30" },
+  TreasuresTalk: { label: "Treasures Talk", dot: "bg-indigo-500", bg: "bg-indigo-50 dark:bg-indigo-950/30" },
+  TreasuresGem: { label: "Treasures Gem", dot: "bg-indigo-500", bg: "bg-indigo-50 dark:bg-indigo-950/30" },
+  ApplyYourself1: { label: "Apply Yourself #1", dot: "bg-teal-500", bg: "bg-teal-50 dark:bg-teal-950/30" },
+  ApplyYourself2: { label: "Apply Yourself #2", dot: "bg-teal-500", bg: "bg-teal-50 dark:bg-teal-950/30" },
+  LivingTalk: { label: "Living Talk", dot: "bg-rose-500", bg: "bg-rose-50 dark:bg-rose-950/30" },
+  CongregationBibleStudy: { label: "Congregation Bible Study", dot: "bg-amber-500", bg: "bg-amber-50 dark:bg-amber-950/30" },
+  Reader: { label: "Reader", dot: "bg-green-500", bg: "bg-green-50 dark:bg-green-950/30" },
+};
+
+// Parse schedule content "Key: Value\nKey: Value" into structured fields
+function parseScheduleFields(content: string | null): { name: string; assignee: string; dot: string; bg: string }[] {
+  if (!content) return [];
+  const lines = content.split("\n");
+  const result: { name: string; assignee: string; dot: string; bg: string }[] = [];
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    // Skip the header line (e.g. "Midweek meeting schedule for ...")
+    if (/^(Midweek meeting|Public talk)\s+schedule for/i.test(trimmed)) continue;
+    const idx = trimmed.indexOf(":");
+    let name: string, assignee: string;
+    if (idx > 0) {
+      name = trimmed.slice(0, idx).trim();
+      assignee = trimmed.slice(idx + 1).trim();
+    } else {
+      name = trimmed;
+      assignee = "";
+    }
+    const colors = SCHEDULE_FIELD_COLORS[name];
+    result.push({
+      name: colors?.label || name,
+      assignee,
+      dot: colors?.dot || "bg-slate-400",
+      bg: colors?.bg || "bg-slate-50 dark:bg-slate-950/30",
+    });
+  }
+  return result;
+}
 
 function ScheduleCarousel({ schedules, language, isAdmin, onOpenPdf, onOpenPhoto, onCardClick, onEdit, onDelete }: {
   schedules: Notice[];
@@ -3853,12 +3916,34 @@ function ScheduleCarousel({ schedules, language, isAdmin, onOpenPdf, onOpenPhoto
                       </>
                     )}
 
-                    {/* Description */}
-                    {schedule.description && (
-                      <div className="rounded-lg border border-border/30 bg-background/50 p-2 max-h-24 overflow-y-auto">
-                        <p className="text-[11px] whitespace-pre-wrap leading-relaxed">{schedule.description}</p>
-                      </div>
-                    )}
+                    {/* Schedule fields as colored blocks (like roles) */}
+                    {(() => {
+                      const fields = parseScheduleFields(schedule.content ?? schedule.description ?? null);
+                      if (fields.length > 0) {
+                        return (
+                          <div className="space-y-1">
+                            {fields.map((f, i) => (
+                              <div key={i} className={`flex items-center gap-2 rounded-lg ${f.bg} border border-border/30 px-2 py-1.5`}>
+                                <div className={`w-1 h-6 rounded-full shrink-0 ${f.dot}`} />
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-[10px] text-muted-foreground uppercase tracking-wide leading-none">{f.name}</p>
+                                  {f.assignee && <p className="text-xs font-medium leading-tight mt-0.5 truncate">{f.assignee}</p>}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        );
+                      }
+                      // Fallback: plain description if no structured fields
+                      if (schedule.description) {
+                        return (
+                          <div className="rounded-lg border border-border/30 bg-background/50 p-2 max-h-24 overflow-y-auto">
+                            <p className="text-[11px] whitespace-pre-wrap leading-relaxed">{schedule.description}</p>
+                          </div>
+                        );
+                      }
+                      return null;
+                    })()}
                   </CardContent>
                 </Card>
               </div>
