@@ -1625,6 +1625,8 @@ export default function PublicNoticeboard() {
                   onCardClick={setDetailNotice}
                   onEdit={handleEditNotice}
                   onDelete={(id) => setDeleteId(id)}
+                  midweekDay={parseInt(String(settings.midweekDay ?? "2"), 10)}
+                  weekendDay={parseInt(String(settings.weekendDay ?? "0"), 10)}
                 />
               )}
 
@@ -3745,7 +3747,7 @@ function MeetingCard({ meeting, language, formatDate, onOpenPdf, onOpenPhoto }: 
 
 // ─── Pinned Schedule Strip (current week meeting + public talk) ──
 
-function PinnedScheduleStrip({ midweekSchedules, publicTalkSchedules, language, isAdmin, onOpenPdf, onOpenPhoto, onCardClick, onEdit, onDelete }: {
+function PinnedScheduleStrip({ midweekSchedules, publicTalkSchedules, language, isAdmin, onOpenPdf, onOpenPhoto, onCardClick, onEdit, onDelete, midweekDay = 2, weekendDay = 0 }: {
   midweekSchedules: Notice[];
   publicTalkSchedules: Notice[];
   language: "en" | "tl";
@@ -3755,19 +3757,46 @@ function PinnedScheduleStrip({ midweekSchedules, publicTalkSchedules, language, 
   onCardClick: (notice: Notice) => void;
   onEdit: (notice: Notice) => void;
   onDelete: (id: string) => void;
+  midweekDay?: number;
+  weekendDay?: number;
 }) {
   const today = new Date().toISOString().split("T")[0];
+  const todayDate = new Date(today + "T00:00:00");
 
-  // Find current or next upcoming schedule for each type
-  const findCurrent = (schedules: Notice[]) => {
-    const upcoming = schedules
-      .filter(s => (s.eventEndDate || s.eventStartDate || "") >= today)
-      .sort((a, b) => (a.eventStartDate || "").localeCompare(b.eventStartDate || ""));
-    return upcoming[0] || null;
+  // Calculate the actual meeting date within a week range
+  // e.g. for Aug 10-16 with midweek on Tuesday (day 2), the meeting date is Aug 12
+  const getMeetingDate = (schedule: Notice, meetingDay: number): string | null => {
+    const start = schedule.eventStartDate;
+    const end = schedule.eventEndDate || start;
+    if (!start) return null;
+    const startDate = new Date(start + "T00:00:00");
+    const endDate = new Date(end + "T00:00:00");
+    // Walk through the week range to find the meeting day
+    for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
+      if (d.getDay() === meetingDay) {
+        return d.toISOString().split("T")[0];
+      }
+    }
+    // If meeting day not in range, fall back to start date
+    return start;
   };
 
-  const currentMidweek = findCurrent(midweekSchedules);
-  const currentPublicTalk = findCurrent(publicTalkSchedules);
+  // Find current or next upcoming schedule — "current" means the meeting day
+  // hasn't passed yet. Once the meeting day passes, the next week becomes current.
+  const findCurrent = (schedules: Notice[], meetingDay: number) => {
+    // Compute meeting date for each schedule and filter to upcoming
+    const withMeetingDate = schedules
+      .map(s => {
+        const meetingDate = getMeetingDate(s, meetingDay);
+        return { schedule: s, meetingDate };
+      })
+      .filter(({ meetingDate }) => meetingDate && meetingDate >= today)
+      .sort((a, b) => (a.meetingDate || "").localeCompare(b.meetingDate || ""));
+    return withMeetingDate[0]?.schedule || null;
+  };
+
+  const currentMidweek = findCurrent(midweekSchedules, midweekDay);
+  const currentPublicTalk = findCurrent(publicTalkSchedules, weekendDay);
 
   if (!currentMidweek && !currentPublicTalk) return null;
 
@@ -3794,7 +3823,10 @@ function PinnedScheduleStrip({ midweekSchedules, publicTalkSchedules, language, 
       );
     }
 
-    const isToday = (() => {
+    const meetingDayNum = type === "midweek" ? midweekDay : weekendDay;
+    const meetingDate = getMeetingDate(schedule, meetingDayNum);
+    const isToday = meetingDate ? today === meetingDate : (today >= (schedule.eventStartDate || "") && today <= (schedule.eventEndDate || schedule.eventStartDate || ""));
+    const isThisWeek = (() => {
       const start = schedule.eventStartDate || "";
       const end = schedule.eventEndDate || start;
       return today >= start && today <= end;
@@ -3802,7 +3834,7 @@ function PinnedScheduleStrip({ midweekSchedules, publicTalkSchedules, language, 
 
     return (
       <div
-        className={`w-full sm:w-[280px] rounded-2xl border-2 p-3.5 shrink-0 cursor-pointer hover:shadow-lg transition-all ${isToday ? "border-green-500 shadow-md shadow-green-500/20" : type === "midweek" ? "border-blue-200 dark:border-blue-800/40 bg-blue-50 dark:bg-blue-950/20" : "border-purple-200 dark:border-purple-800/40 bg-purple-50 dark:bg-purple-950/20"}`}
+        className={`w-full sm:w-[280px] rounded-2xl border-2 p-3.5 shrink-0 cursor-pointer hover:shadow-lg transition-all ${isThisWeek ? "border-green-500 shadow-md shadow-green-500/20" : isToday ? "border-green-400" : type === "midweek" ? "border-blue-200 dark:border-blue-800/40 bg-blue-50 dark:bg-blue-950/20" : "border-purple-200 dark:border-purple-800/40 bg-purple-50 dark:bg-purple-950/20"}`}
         onClick={() => onCardClick(schedule)}
       >
         <div className="flex items-center gap-2 mb-2">
@@ -3815,28 +3847,28 @@ function PinnedScheduleStrip({ midweekSchedules, publicTalkSchedules, language, 
             </p>
             <p className="text-[11px] text-muted-foreground truncate">
               {fmtRange(schedule.eventStartDate || null, schedule.eventEndDate || null)}
-              {isToday && <span className="text-green-600 dark:text-green-400 font-bold ml-1">· This week</span>}
+              {isThisWeek && <span className="text-green-600 dark:text-green-400 font-bold ml-1">· This week</span>}
             </p>
           </div>
           {isToday && (
             <span className="shrink-0 px-1.5 py-0.5 rounded-full bg-green-500 text-white text-[9px] font-bold tracking-wide flex items-center gap-1">
               <span className="h-1 w-1 rounded-full bg-white animate-pulse" />
-              CURRENT
+              TODAY
             </span>
           )}
         </div>
 
         {/* Thumbnail / file link */}
         {schedule.fileUrl && (
-          <div className="flex items-center gap-2">
+          <div className="space-y-2">
             {isImageFile(schedule.fileUrl, schedule.fileName) && (
               <LazyImage
                 src={schedule.fileUrl}
                 alt={schedule.title}
-                className="rounded-lg h-20 w-28 object-cover shrink-0"
+                className="rounded-lg w-full h-32 object-contain bg-muted/30 shrink-0"
               />
             )}
-            <div className="flex flex-col gap-1 min-w-0">
+            <div className="flex items-center gap-2">
               {isPdfFile(schedule.fileUrl, schedule.fileName) ? (
                 <button onClick={(e) => { e.stopPropagation(); onOpenPdf(schedule.fileUrl!, schedule.title); }} className="flex items-center gap-1.5 text-xs text-indigo-600 dark:text-indigo-400 hover:underline font-medium">
                   <FileText className="h-3.5 w-3.5" />View Schedule
@@ -3849,17 +3881,17 @@ function PinnedScheduleStrip({ midweekSchedules, publicTalkSchedules, language, 
               <a href={schedule.fileUrl} download onClick={(e) => e.stopPropagation()} className="flex items-center gap-1.5 text-xs text-green-600 dark:text-green-400 hover:underline font-medium">
                 <Download className="h-3.5 w-3.5" />Download
               </a>
+              {isAdmin && (
+                <div className="flex gap-0.5 ml-auto shrink-0">
+                  <Button variant="ghost" size="sm" className="h-6 w-6 p-0 rounded-md" onClick={(e) => { e.stopPropagation(); onEdit(schedule); }}>
+                    <Edit className="h-3 w-3" />
+                  </Button>
+                  <Button variant="ghost" size="sm" className="h-6 w-6 p-0 rounded-md text-red-500" onClick={(e) => { e.stopPropagation(); onDelete(schedule.id); }}>
+                    <Trash2 className="h-3 w-3" />
+                  </Button>
+                </div>
+              )}
             </div>
-            {isAdmin && (
-              <div className="flex gap-0.5 ml-auto shrink-0">
-                <Button variant="ghost" size="sm" className="h-6 w-6 p-0 rounded-md" onClick={(e) => { e.stopPropagation(); onEdit(schedule); }}>
-                  <Edit className="h-3 w-3" />
-                </Button>
-                <Button variant="ghost" size="sm" className="h-6 w-6 p-0 rounded-md text-red-500" onClick={(e) => { e.stopPropagation(); onDelete(schedule.id); }}>
-                  <Trash2 className="h-3 w-3" />
-                </Button>
-              </div>
-            )}
           </div>
         )}
 

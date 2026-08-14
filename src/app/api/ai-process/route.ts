@@ -36,22 +36,27 @@ export async function POST(request: NextRequest) {
     let imgBuffer: Buffer;
     let mimeType: string;
 
-    if (imageUrl.startsWith("/api/files/")) {
+    // Normalize the image URL — extract the path portion if it's a full URL
+    const normalizedUrl = imageUrl.startsWith("http") ? new URL(imageUrl).pathname : imageUrl;
+
+    if (normalizedUrl.startsWith("/api/files/")) {
       // Extract file ID and fetch directly from database (no HTTP roundtrip needed)
-      const fileId = imageUrl.replace("/api/files/", "").split("/")[0].split("?")[0];
+      const fileId = normalizedUrl.replace("/api/files/", "").split("/")[0].split("?")[0];
+      console.log("[ai-process] Looking up file ID:", fileId, "from URL:", imageUrl);
       const file = await db.uploadedFile.findUnique({
         where: { id: fileId },
         select: { data: true, mimeType: true },
       });
       if (!file || !file.data) {
-        return NextResponse.json({ error: "Image file not found in database" }, { status: 404 });
+        console.error("[ai-process] File not found in DB. ID:", fileId);
+        return NextResponse.json({ error: `Image file not found in database (id: ${fileId})` }, { status: 404 });
       }
       imgBuffer = Buffer.from(file.data);
       mimeType = file.mimeType || "image/png";
     } else {
       // External URL or disk path — fetch via HTTP
       const baseUrl = process.env.NEXTAUTH_URL || `http://localhost:${process.env.PORT || 2424}`;
-      const absoluteImageUrl = imageUrl.startsWith("http") ? imageUrl : `${baseUrl}${imageUrl.startsWith("/") ? "" : "/"}${imageUrl}`;
+      const absoluteImageUrl = normalizedUrl.startsWith("http") ? normalizedUrl : `${baseUrl}${normalizedUrl.startsWith("/") ? "" : "/"}${normalizedUrl}`;
       const imgRes = await fetch(absoluteImageUrl);
       if (!imgRes.ok) {
         return NextResponse.json({ error: `Failed to fetch image (${imgRes.status})` }, { status: 500 });
