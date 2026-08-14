@@ -31,6 +31,7 @@ interface MeetingEntry {
   date: string;
   content: string;
   fields?: { key: string; value: string }[];
+  color?: string | null;
 }
 
 // Color mapping for schedule fields
@@ -142,7 +143,7 @@ export function ScheduleModal({ open, onClose, onSaved, variant, categories }: S
   const Icon = isMidweek ? BookOpen : Mic;
 
   const aiPromptTemplate = isMidweek
-    ? `Convert the following midweek meeting schedule image into this exact JSON format:\n\n[\n  {\n    "Date": "{YYYY-MM-DD}",\n    "BibleReading": "{Name}",\n    "TreasuresTalk": "{Name}",\n    "TreasuresGem": "{Name}",\n    "ApplyYourself1": "{Name}",\n    "ApplyYourself2": "{Name}",\n    "LivingTalk": "{Name}",\n    "CongregationBibleStudy": "{Name}",\n    "Reader": "{Name}",\n    "Prayer": "{Name}"\n  }\n]\n\nReturn ONLY the JSON array, one object per meeting date. If there are multiple dates in the image, include multiple objects in the array.`
+    ? `Convert the following midweek meeting schedule image into this exact JSON format:\n\n[\n  {\n    "Date": "{YYYY-MM-DD}",\n    "BibleReading": "{Name}",\n    "TreasuresTalk": "{Name}",\n    "TreasuresGem": "{Name}",\n    "ApplyYourself1": "{Name}",\n    "ApplyYourself2": "{Name}",\n    "LivingTalk": "{Name}",\n    "CongregationBibleStudy": "{Name}",\n    "Reader": "{Name}",\n    "Prayer": "{Name}",\n    "Color": "{optional: the background or highlight color of this row/section in the image, as a hex code like #RRGGBB or a color name}"\n  }\n]\n\nReturn ONLY the JSON array, one object per meeting date. If there are multiple dates in the image, include multiple objects in the array. The "Color" field is optional — if you can identify a color associated with each entry in the image (e.g. a colored row, header, or highlight), include it; otherwise omit it.`
     : `Convert the following public talk schedule image into this exact JSON format:\n\n[\n  {\n    "Date": "{YYYY-MM-DD}",\n    "Speaker": "{Name}",\n    "Congregation": "{Congregation Name}",\n    "TalkTheme": "{Theme Number or Title}",\n    "Chairman": "{Name}",\n    "Prayer": "{Name}",\n    "WTStudyReader": "{Name}"\n  }\n]\n\nReturn ONLY the JSON array, one object per meeting date. If there are multiple dates in the image, include multiple objects in the array.`;
 
   useEffect(() => {
@@ -264,11 +265,12 @@ export function ScheduleModal({ open, onClose, onSaved, variant, categories }: S
         parsedEntries = parsed.map((obj: Record<string, string>) => {
           const dateStr = obj.Date || obj.date || "";
           const parsedDate = parseDateFromText(dateStr) || dateStr;
+          const color = obj.Color || obj.color || null;
           const fields = Object.entries(obj)
-            .filter(([k]) => k.toLowerCase() !== "date")
+            .filter(([k]) => k.toLowerCase() !== "date" && k.toLowerCase() !== "color")
             .map(([k, v]) => ({ key: k, value: String(v || "") }));
           const content = fields.map(f => f.value.trim() ? `${f.key}: ${f.value}` : f.key).join("\n");
-          return { date: parsedDate, content, fields };
+          return { date: parsedDate, content, fields, color };
         });
       }
     } catch {
@@ -580,8 +582,13 @@ export function ScheduleModal({ open, onClose, onSaved, variant, categories }: S
                 const isCorrectDay = d && d.getDay() === meetingDay;
                 const dateLabel = d ? d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" }) : "No date";
                 const fields = entry.fields || parseFields(entry.content);
+                const entryColor = entry.color || null;
                 return (
-                  <div key={idx} className={`rounded-2xl border-2 p-3 space-y-2.5 transition-all ${isCorrectDay ? `${isMidweek ? "border-blue-200 dark:border-blue-800/40 bg-blue-50/30 dark:bg-blue-950/10" : "border-purple-200 dark:border-purple-800/40 bg-purple-50/30 dark:bg-purple-950/10"}` : "border-amber-300 dark:border-amber-700/50 bg-amber-50/30 dark:bg-amber-950/10"}`}>
+                  <div key={idx} className={`relative rounded-2xl border-2 p-3 space-y-2.5 transition-all ${isCorrectDay ? `${isMidweek ? "border-blue-200 dark:border-blue-800/40 bg-blue-50/30 dark:bg-blue-950/10" : "border-purple-200 dark:border-purple-800/40 bg-purple-50/30 dark:bg-purple-950/10"}` : "border-amber-300 dark:border-amber-700/50 bg-amber-50/30 dark:bg-amber-950/10"}`}>
+                    {/* Color accent strip from AI */}
+                    {entryColor && (
+                      <div className="absolute left-0 top-0 bottom-0 w-1.5 rounded-l-2xl" style={{ backgroundColor: entryColor }} />
+                    )}
                     {/* Date header bar */}
                     <div className="flex items-center justify-between gap-2">
                       <div className="flex items-center gap-2 flex-1 min-w-0">
@@ -592,6 +599,12 @@ export function ScheduleModal({ open, onClose, onSaved, variant, categories }: S
                           <span className="text-sm font-semibold leading-tight">{dateLabel}</span>
                           {!isCorrectDay && d && (
                             <span className="text-[10px] text-amber-600 font-medium">Expected {DAY_NAMES[meetingDay]}</span>
+                          )}
+                          {entryColor && (
+                            <span className="text-[10px] text-muted-foreground font-medium flex items-center gap-1">
+                              <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: entryColor }} />
+                              {entryColor}
+                            </span>
                           )}
                         </div>
                       </div>

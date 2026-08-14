@@ -67,6 +67,8 @@ import {
   Code,
   List,
   Type,
+  ClipboardPaste,
+  Wand2,
 } from "lucide-react";
 import { t } from "@/lib/i18n";
 import dynamic from "next/dynamic";
@@ -435,6 +437,9 @@ export default function PublicNoticeboard() {
   const { toast } = useToast();
   const [editingNotice, setEditingNotice] = useState<Partial<Notice> | null>(null);
   const [editOpen, setEditOpen] = useState(false);
+  const [showEditAiSection, setShowEditAiSection] = useState(false);
+  const [editAiPasteText, setEditAiPasteText] = useState("");
+  const [editAiCopying, setEditAiCopying] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showAddPicker, setShowAddPicker] = useState(false);
   const [showScheduleModal, setShowScheduleModal] = useState<null | "midweek" | "public-talk">(null);
@@ -464,6 +469,8 @@ export default function PublicNoticeboard() {
       setEditingLink(notice);
     } else {
       setEditingNotice({ ...notice });
+      setShowEditAiSection(false);
+      setEditAiPasteText("");
       setEditOpen(true);
     }
   }, []);
@@ -702,6 +709,8 @@ export default function PublicNoticeboard() {
       categoryId,
     });
     setShowCreateModal(false);
+    setShowEditAiSection(false);
+    setEditAiPasteText("");
     setEditOpen(true);
   }, []);
 
@@ -1525,10 +1534,10 @@ export default function PublicNoticeboard() {
                 <div className="flex flex-wrap gap-2">
                   <button
                     onClick={() => { setActiveCategory(null); }}
-                    className={`px-3.5 py-1.5 rounded-full text-xs font-medium transition-all whitespace-nowrap flex items-center gap-1.5 ${!activeCategory ? "bg-indigo-500 text-white" : "bg-card border border-border/40 text-muted-foreground hover:border-indigo-300"}`}
+                    className={`px-3.5 py-1.5 rounded-full text-xs font-medium transition-all whitespace-nowrap flex items-center justify-center gap-1.5 ${!activeCategory ? "bg-indigo-500 text-white" : "bg-card border border-border/40 text-muted-foreground hover:border-indigo-300"}`}
                   >
                     All
-                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${!activeCategory ? "bg-white/20" : "bg-muted/40"}`}>{[...pinnedNotices, ...regularNotices].filter(filterFn).length}</span>
+                    {(() => { const allCount = [...pinnedNotices, ...regularNotices].filter(filterFn).length; return allCount > 0 && <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${!activeCategory ? "bg-white/20" : "bg-muted/40"}`}>{allCount}</span>; })()}
                   </button>
                   {categories.map(c => {
                     const count = categoryCounts[c.id] || 0;
@@ -1536,7 +1545,7 @@ export default function PublicNoticeboard() {
                     <button
                       key={c.id}
                       onClick={() => { setActiveCategory(activeCategory === c.id ? null : c.id); setTimeout(() => document.getElementById(`cat-${c.id}`)?.scrollIntoView({ behavior: "smooth", block: "start" }), 100); }}
-                      className={`px-3.5 py-1.5 rounded-full text-xs font-medium transition-all flex items-center gap-1.5 whitespace-nowrap ${activeCategory === c.id ? "bg-indigo-500 text-white" : "bg-card border border-border/40 text-muted-foreground hover:border-indigo-300"}`}
+                      className={`px-3.5 py-1.5 rounded-full text-xs font-medium transition-all flex items-center justify-center gap-1.5 whitespace-nowrap ${activeCategory === c.id ? "bg-indigo-500 text-white" : "bg-card border border-border/40 text-muted-foreground hover:border-indigo-300"}`}
                     >
                       {c.color && <span className="h-2 w-2 rounded-full shrink-0" style={{ backgroundColor: c.color }} />}
                       {c.name}
@@ -1863,7 +1872,7 @@ export default function PublicNoticeboard() {
               />
               {editingNotice.fileUrl && isImageFile(editingNotice.fileUrl, editingNotice.fileName) ? (
                 <div className="relative rounded-xl overflow-hidden border border-border/40 group">
-                  <img src={editingNotice.fileUrl} alt="Preview" className="w-full max-h-48 object-cover" />
+                  <img src={editingNotice.fileUrl} alt="Preview" className="w-full max-h-96 object-contain bg-muted/20" />
                   <button
                     onClick={() => setEditingNotice({ ...editingNotice, fileUrl: null, thumbnailUrl: null, fileName: null })}
                     className="absolute top-2 right-2 bg-black/50 text-white rounded-lg p-1.5 opacity-0 group-hover:opacity-100 transition-opacity"
@@ -1907,6 +1916,133 @@ export default function PublicNoticeboard() {
                 </button>
               )}
 
+              {/* AI Prompt section — only for schedule notices with an image */}
+              {editingNotice.fileUrl && isImageFile(editingNotice.fileUrl, editingNotice.fileName) && (() => {
+                const titleLower = (editingNotice.title || "").toLowerCase();
+                const isMidweek = titleLower.includes("midweek");
+                const isPublicTalk = titleLower.includes("public talk");
+                if (!isMidweek && !isPublicTalk) return null;
+                const aiPrompt = isMidweek
+                  ? `Convert the following midweek meeting schedule image into this exact JSON format:\n\n[\n  {\n    "Date": "{YYYY-MM-DD}",\n    "BibleReading": "{Name}",\n    "TreasuresTalk": "{Name}",\n    "TreasuresGem": "{Name}",\n    "ApplyYourself1": "{Name}",\n    "ApplyYourself2": "{Name}",\n    "LivingTalk": "{Name}",\n    "CongregationBibleStudy": "{Name}",\n    "Reader": "{Name}",\n    "Prayer": "{Name}",\n    "Color": "{optional: the background or highlight color of this row/section in the image, as a hex code like #RRGGBB or a color name}"\n  }\n]\n\nReturn ONLY the JSON array, one object per meeting date. If there are multiple dates in the image, include multiple objects in the array. The "Color" field is optional — if you can identify a color associated with each entry in the image (e.g. a colored row, header, or highlight), include it; otherwise omit it.`
+                  : `Convert the following public talk schedule image into this exact JSON format:\n\n[\n  {\n    "Date": "{YYYY-MM-DD}",\n    "Speaker": "{Name}",\n    "Congregation": "{Congregation Name}",\n    "TalkTheme": "{Theme Number or Title}",\n    "Chairman": "{Name}",\n    "Prayer": "{Name}",\n    "WTStudyReader": "{Name}"\n  }\n]\n\nReturn ONLY the JSON array, one object per meeting date. If there are multiple dates in the image, include multiple objects in the array.`;
+
+                const copyForAi = async () => {
+                  setEditAiCopying(true);
+                  try {
+                    // Fetch the image as a blob
+                    const imgRes = await fetch(editingNotice.fileUrl!);
+                    const imgBlob = await imgRes.blob();
+                    // Determine MIME type (default to png)
+                    const mime = imgBlob.type || "image/png";
+                    // Try to write both text and image to clipboard
+                    if (navigator.clipboard && window.ClipboardItem) {
+                      const clipboardItem = new ClipboardItem({
+                        "text/plain": new Blob([aiPrompt], { type: "text/plain" }),
+                        [mime]: imgBlob,
+                      });
+                      await navigator.clipboard.write([clipboardItem]);
+                      toast({ title: "AI prompt + image copied to clipboard!", description: "Paste into your AI chat (Ctrl+V / Cmd+V)" });
+                    } else {
+                      // Fallback: copy text only
+                      await navigator.clipboard.writeText(aiPrompt);
+                      toast({ title: "AI prompt copied (image not supported on this browser)", description: "Attach the image manually in your AI chat" });
+                    }
+                  } catch (err) {
+                    // Fallback: copy text only
+                    try {
+                      await navigator.clipboard.writeText(aiPrompt);
+                      toast({ title: "AI prompt copied to clipboard", description: "Attach the image manually in your AI chat" });
+                    } catch {
+                      toast({ title: "Failed to copy", variant: "destructive" });
+                    }
+                  } finally {
+                    setEditAiCopying(false);
+                  }
+                };
+
+                const parseAiToContent = () => {
+                  if (!editAiPasteText.trim()) return;
+                  let cleanText = editAiPasteText.trim();
+                  cleanText = cleanText.replace(/^```(?:json)?\s*\n?/i, "").replace(/\n?```\s*$/i, "").trim();
+                  try {
+                    const parsed = JSON.parse(cleanText);
+                    if (Array.isArray(parsed) && parsed.length > 0) {
+                      // Build content string from all entries
+                      const lines: string[] = [];
+                      for (const obj of parsed) {
+                        const dateStr = obj.Date || obj.date || "";
+                        const fields = Object.entries(obj)
+                          .filter(([k]) => k.toLowerCase() !== "date" && k.toLowerCase() !== "color")
+                          .map(([k, v]) => `${k}: ${v || ""}`);
+                        if (dateStr) {
+                          const d = new Date(dateStr + "T00:00:00");
+                          if (!isNaN(d.getTime())) {
+                            lines.push(d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" }));
+                          }
+                        }
+                        lines.push(...fields);
+                        lines.push("");
+                      }
+                      setEditingNotice({ ...editingNotice, content: lines.join("\n").trim() });
+                      toast({ title: `Parsed ${parsed.length} entr${parsed.length === 1 ? "y" : "ies"} from AI output` });
+                    } else {
+                      toast({ title: "No valid entries found in AI output", variant: "destructive" });
+                    }
+                  } catch {
+                    toast({ title: "Failed to parse AI JSON output", variant: "destructive" });
+                  }
+                };
+
+                return (
+                  <div className="space-y-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowEditAiSection(!showEditAiSection)}
+                      className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      {showEditAiSection ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                      <Wand2 className="h-3.5 w-3.5" />
+                      AI Prompt & Paste
+                    </button>
+                    {showEditAiSection && (
+                      <div className="space-y-3 rounded-xl border border-border/40 p-3 bg-muted/10">
+                        <p className="text-xs text-muted-foreground">
+                          Copy the AI prompt + schedule image to your clipboard in one action, then paste into an AI chat to get structured JSON.
+                        </p>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="rounded-lg w-full bg-teal-50 dark:bg-teal-950/20 border-teal-200 dark:border-teal-800/40 text-teal-700 dark:text-teal-300 hover:bg-teal-100 dark:hover:bg-teal-950/30"
+                          onClick={copyForAi}
+                          disabled={editAiCopying}
+                        >
+                          {editAiCopying ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <ClipboardPaste className="h-3.5 w-3.5 mr-1.5" />}
+                          {editAiCopying ? "Copying..." : "Copy for AI (prompt + image)"}
+                        </Button>
+                        <div className="space-y-1.5">
+                          <Label className="text-xs font-semibold text-muted-foreground">Paste AI JSON Output Here</Label>
+                          <Textarea
+                            value={editAiPasteText}
+                            onChange={(e) => setEditAiPasteText(e.target.value)}
+                            rows={6}
+                            placeholder="Paste the AI model's JSON output here. It will be converted to schedule content."
+                            className="rounded-lg text-sm font-mono"
+                          />
+                          <Button
+                            size="sm"
+                            className="rounded-lg w-full bg-teal-600 hover:bg-teal-700"
+                            onClick={parseAiToContent}
+                            disabled={!editAiPasteText.trim()}
+                          >
+                            <ClipboardPaste className="h-3.5 w-3.5 mr-1" /> Parse & Fill Content
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
               <div className="space-y-2">
                 <Label>Title</Label>
                 <Input
@@ -1941,7 +2077,7 @@ export default function PublicNoticeboard() {
                   </SelectContent>
                 </Select>
               </div>
-              {autoType(editingNotice) === "text" && (
+              {(autoType(editingNotice) === "text" || editingNotice.content) && (
                 <div className="space-y-2">
                   <Label>Content</Label>
                   <Textarea
@@ -2471,7 +2607,8 @@ export default function PublicNoticeboard() {
                   setChangePwCurrent("");
                   setChangePwNew("");
                   setChangePwConfirm("");
-                  router.refresh();
+                  // Sign out — session is invalidated by tokenVersion increment
+                  await signOut({ callbackUrl: "/" });
                 } else {
                   const data = await res.json();
                   setChangePwError(data.error || "Failed to change password");
@@ -2660,7 +2797,7 @@ export default function PublicNoticeboard() {
                     <div className="flex items-center gap-2 rounded-xl bg-indigo-50 dark:bg-indigo-950/30 px-3 py-2 border border-indigo-200 dark:border-indigo-800/40">
                       <CalendarCountdown className="h-4 w-4 text-indigo-600 dark:text-indigo-400 shrink-0" />
                       <span className="text-xs font-semibold text-indigo-700 dark:text-indigo-300">
-                        {cd.days > 0 && `${cd.days}d `}{cd.hours > 0 && `${cd.hours}h `}{cd.days === 0 && `${cd.mins}m `}left
+                        {cd.days > 0 && `${cd.days}d `}{cd.hours > 0 && `${cd.hours}h `}{cd.days === 0 && `${cd.mins}m `}until event
                       </span>
                     </div>
                   ) : null;
@@ -3269,7 +3406,7 @@ function PadletCard({ notice, language, onCardClick, bookmarked, onToggleBookmar
               {countdown.days > 0 && `${countdown.days}d `}
               {countdown.hours > 0 && `${countdown.hours}h `}
               {countdown.days === 0 && `${countdown.mins}m `}
-              left
+              until event
             </span>
           </div>
         )}
@@ -3416,8 +3553,8 @@ function EventCard({ event, language, onClick }: { event: SpecialEvent; language
   return (
     <Card className={`snap-start shrink-0 w-[160px] sm:w-[200px] card-hover rounded-xl border-l-4 ${colors.border} border-y border-r border-border/40 bg-card overflow-hidden cursor-pointer`} onClick={() => onClick?.(event)}>
       {event.imageUrl && (
-        <div className="relative w-full h-24 overflow-hidden">
-          <img src={event.imageUrl} alt={title} className="w-full h-full object-cover" loading="lazy" />
+        <div className="relative w-full h-32 overflow-hidden bg-muted/20">
+          <img src={event.imageUrl} alt={title} className="w-full h-full object-contain" loading="lazy" />
         </div>
       )}
       <CardContent className="p-2.5 space-y-1">
@@ -3539,7 +3676,7 @@ function PinnedScheduleStrip({ midweekSchedules, publicTalkSchedules, language, 
   const renderScheduleCard = (schedule: Notice | null, type: "midweek" | "public-talk") => {
     if (!schedule) {
       return (
-        <div className={`flex-1 rounded-2xl border-2 border-dashed border-border/30 p-4 min-w-0 ${type === "midweek" ? "bg-blue-50/30 dark:bg-blue-950/10" : "bg-purple-50/30 dark:bg-purple-950/10"}`}>
+        <div className={`w-full sm:w-[280px] rounded-2xl border-2 border-dashed border-border/30 p-4 shrink-0 ${type === "midweek" ? "bg-blue-50/30 dark:bg-blue-950/10" : "bg-purple-50/30 dark:bg-purple-950/10"}`}>
           <div className="flex items-center gap-2 mb-2">
             <div className={`h-7 w-7 rounded-lg flex items-center justify-center text-white shrink-0 ${type === "midweek" ? "bg-blue-400" : "bg-purple-400"}`}>
               {type === "midweek" ? <BookOpen className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
@@ -3559,7 +3696,7 @@ function PinnedScheduleStrip({ midweekSchedules, publicTalkSchedules, language, 
 
     return (
       <div
-        className={`flex-1 rounded-2xl border-2 p-3.5 min-w-0 cursor-pointer hover:shadow-lg transition-all ${isToday ? "border-green-500 shadow-md shadow-green-500/20" : type === "midweek" ? "border-blue-200 dark:border-blue-800/40 bg-blue-50 dark:bg-blue-950/20" : "border-purple-200 dark:border-purple-800/40 bg-purple-50 dark:bg-purple-950/20"}`}
+        className={`w-full sm:w-[280px] rounded-2xl border-2 p-3.5 shrink-0 cursor-pointer hover:shadow-lg transition-all ${isToday ? "border-green-500 shadow-md shadow-green-500/20" : type === "midweek" ? "border-blue-200 dark:border-blue-800/40 bg-blue-50 dark:bg-blue-950/20" : "border-purple-200 dark:border-purple-800/40 bg-purple-50 dark:bg-purple-950/20"}`}
         onClick={() => onCardClick(schedule)}
       >
         <div className="flex items-center gap-2 mb-2">
@@ -3590,7 +3727,7 @@ function PinnedScheduleStrip({ midweekSchedules, publicTalkSchedules, language, 
               <LazyImage
                 src={schedule.fileUrl}
                 alt={schedule.title}
-                className="rounded-lg h-16 w-24 object-cover shrink-0"
+                className="rounded-lg h-20 w-28 object-cover shrink-0"
               />
             )}
             <div className="flex flex-col gap-1 min-w-0">
@@ -3642,7 +3779,7 @@ function PinnedScheduleStrip({ midweekSchedules, publicTalkSchedules, language, 
   };
 
   return (
-    <div className="flex flex-col sm:flex-row gap-3">
+    <div className="flex flex-col sm:flex-row gap-3 sm:w-fit">
       {renderScheduleCard(currentMidweek, "midweek")}
       {renderScheduleCard(currentPublicTalk, "public-talk")}
     </div>

@@ -29,9 +29,30 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     }
 
     const updateData: Record<string, unknown> = {};
+
+    // Prevent changing username or role of existing super_admin users
+    const existingUser = await db.user.findUnique({ where: { id }, select: { role: true, username: true } });
+    if (existingUser?.role === "super_admin") {
+      if (body.username !== undefined && body.username !== existingUser.username) {
+        return NextResponse.json({ error: "Super admin username cannot be changed" }, { status: 400 });
+      }
+      if (body.role !== undefined && body.role !== "super_admin") {
+        return NextResponse.json({ error: "Super admin role cannot be changed" }, { status: 400 });
+      }
+    } else {
+      // Non-super-admin users can only be "admin"
+      if (body.role !== undefined && body.role !== "admin") {
+        return NextResponse.json({ error: "Only admin role is allowed for non-super-admin users" }, { status: 400 });
+      }
+    }
+
     if (body.name !== undefined) updateData.name = body.name;
     if (body.username !== undefined) updateData.username = body.username;
-    if (body.email !== undefined) updateData.email = body.email;
+    if (body.email !== undefined) {
+      // Use unique placeholder if email is empty
+      const username = existingUser?.username || body.username || "";
+      updateData.email = body.email && body.email.trim() ? body.email.trim() : `${username}@local`;
+    }
     if (body.role !== undefined) updateData.role = body.role;
     if (body.permissions !== undefined) {
       updateData.permissions = typeof body.permissions === "string" ? body.permissions : JSON.stringify(body.permissions || []);

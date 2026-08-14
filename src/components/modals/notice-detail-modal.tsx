@@ -81,6 +81,83 @@ function timeAgo(dateStr: string): string {
   return new Date(dateStr).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
+// Color mapping for schedule fields
+const SCHEDULE_FIELD_COLORS: Record<string, { label: string; dot: string; bg: string; text: string }> = {
+  Speaker: { label: "Speaker", dot: "bg-blue-500", bg: "bg-blue-50 dark:bg-blue-950/30", text: "text-blue-700 dark:text-blue-300" },
+  Congregation: { label: "Congregation", dot: "bg-cyan-500", bg: "bg-cyan-50 dark:bg-cyan-950/30", text: "text-cyan-700 dark:text-cyan-300" },
+  TalkTheme: { label: "Talk Theme", dot: "bg-indigo-500", bg: "bg-indigo-50 dark:bg-indigo-950/30", text: "text-indigo-700 dark:text-indigo-300" },
+  Chairman: { label: "Chairman", dot: "bg-purple-500", bg: "bg-purple-50 dark:bg-purple-950/30", text: "text-purple-700 dark:text-purple-300" },
+  Prayer: { label: "Prayer", dot: "bg-green-500", bg: "bg-green-50 dark:bg-green-950/30", text: "text-green-700 dark:text-green-300" },
+  WTStudyReader: { label: "WT Study Reader", dot: "bg-amber-500", bg: "bg-amber-50 dark:bg-amber-950/30", text: "text-amber-700 dark:text-amber-300" },
+  BibleReading: { label: "Bible Reading", dot: "bg-blue-500", bg: "bg-blue-50 dark:bg-blue-950/30", text: "text-blue-700 dark:text-blue-300" },
+  TreasuresTalk: { label: "Treasures Talk", dot: "bg-indigo-500", bg: "bg-indigo-50 dark:bg-indigo-950/30", text: "text-indigo-700 dark:text-indigo-300" },
+  TreasuresGem: { label: "Treasures Gem", dot: "bg-indigo-500", bg: "bg-indigo-50 dark:bg-indigo-950/30", text: "text-indigo-700 dark:text-indigo-300" },
+  ApplyYourself1: { label: "Apply Yourself #1", dot: "bg-teal-500", bg: "bg-teal-50 dark:bg-teal-950/30", text: "text-teal-700 dark:text-teal-300" },
+  ApplyYourself2: { label: "Apply Yourself #2", dot: "bg-teal-500", bg: "bg-teal-50 dark:bg-teal-950/30", text: "text-teal-700 dark:text-teal-300" },
+  LivingTalk: { label: "Living Talk", dot: "bg-rose-500", bg: "bg-rose-50 dark:bg-rose-950/30", text: "text-rose-700 dark:text-rose-300" },
+  CongregationBibleStudy: { label: "Congregation Bible Study", dot: "bg-amber-500", bg: "bg-amber-50 dark:bg-amber-950/30", text: "text-amber-700 dark:text-amber-300" },
+  Reader: { label: "Reader", dot: "bg-green-500", bg: "bg-green-50 dark:bg-green-950/30", text: "text-green-700 dark:text-green-300" },
+};
+
+// Check if content looks like a schedule (has known schedule field names)
+function isScheduleContent(content: string): boolean {
+  const knownFields = ["Speaker", "Chairman", "Prayer", "TalkTheme", "WTStudyReader", "Congregation",
+    "BibleReading", "TreasuresTalk", "TreasuresGem", "ApplyYourself1", "ApplyYourself2",
+    "LivingTalk", "CongregationBibleStudy", "Reader"];
+  return knownFields.some(f => content.includes(f + ":"));
+}
+
+// Parse schedule content into structured fields
+function parseScheduleFields(content: string): { name: string; value: string; dot: string; bg: string; text: string }[] {
+  const lines = content.split("\n");
+  const result: { name: string; value: string; dot: string; bg: string; text: string }[] = [];
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    // Skip header lines like "Public talk schedule for ..." or "Midweek meeting schedule for ..."
+    if (/^(Midweek meeting|Public talk)\s+schedule for/i.test(trimmed)) continue;
+    // Skip day-of-week header lines like "Sun Aug 23" or "Sunday, August 23"
+    if (/^(Sun|Mon|Tue|Wed|Thu|Fri|Sat)\w*\s+\w+\s+\d+/i.test(trimmed)) continue;
+    const idx = trimmed.indexOf(":");
+    let name: string, value: string;
+    if (idx > 0) {
+      name = trimmed.slice(0, idx).trim();
+      value = trimmed.slice(idx + 1).trim();
+    } else {
+      name = trimmed;
+      value = "";
+    }
+    const colors = SCHEDULE_FIELD_COLORS[name];
+    result.push({
+      name: colors?.label || name,
+      value,
+      dot: colors?.dot || "bg-slate-400",
+      bg: colors?.bg || "bg-slate-50 dark:bg-slate-950/30",
+      text: colors?.text || "text-slate-700 dark:text-slate-300",
+    });
+  }
+  return result;
+}
+
+// Render schedule content as structured colored blocks
+function ScheduleFieldsDisplay({ content }: { content: string }) {
+  const fields = parseScheduleFields(content);
+  if (fields.length === 0) return null;
+  return (
+    <div className="space-y-1.5">
+      {fields.map((f, i) => (
+        <div key={i} className={`flex items-start gap-2.5 rounded-xl ${f.bg} border border-border/30 px-3 py-2`}>
+          <div className={`w-1.5 h-5 rounded-full shrink-0 mt-0.5 ${f.dot}`} />
+          <div className="flex-1 min-w-0">
+            <p className="text-[10px] text-muted-foreground uppercase tracking-wide leading-none font-semibold">{f.name}</p>
+            {f.value && <p className={`text-sm font-medium leading-tight mt-1 ${f.text}`}>{f.value}</p>}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function NoticeDetailModal({
   notice, language, bookmarked, onToggleBookmark, onClose,
   isAdmin, onEdit, onDelete, onTogglePin, onArchive, onOpenPdf, siteDomain,
@@ -185,15 +262,33 @@ export function NoticeDetailModal({
         </div>
       )}
 
-      {/* Description */}
-      {description && (
-        <p className="text-sm leading-relaxed">{description}</p>
-      )}
+      {/* Description — show as structured blocks for schedules, plain text otherwise */}
+      {description && (() => {
+        const isSchedule = isScheduleContent(description);
+        if (isSchedule) {
+          // Extract the header line (e.g. "Public talk schedule for Sun, Aug 23")
+          const headerMatch = description.match(/^(Midweek meeting|Public talk)\s+schedule for\s+.+/im);
+          const body = headerMatch ? description.slice(headerMatch[0].length).trim() : description;
+          return (
+            <div className="space-y-2">
+              {headerMatch && (
+                <p className="text-sm font-bold text-muted-foreground">{headerMatch[0]}</p>
+              )}
+              <ScheduleFieldsDisplay content={body} />
+            </div>
+          );
+        }
+        return <p className="text-sm leading-relaxed">{description}</p>;
+      })()}
 
-      {/* Text content */}
-      {!currentImage && !isPdf && !notice.fileUrl && notice.content && (
-        <p className="text-sm whitespace-pre-wrap leading-relaxed">{notice.content}</p>
-      )}
+      {/* Text content — show as structured blocks for schedules, plain text otherwise */}
+      {!currentImage && !isPdf && !notice.fileUrl && notice.content && (() => {
+        const isSchedule = isScheduleContent(notice.content);
+        if (isSchedule) {
+          return <ScheduleFieldsDisplay content={notice.content} />;
+        }
+        return <p className="text-sm whitespace-pre-wrap leading-relaxed">{notice.content}</p>;
+      })()}
 
       {/* Location */}
       {notice.location && (

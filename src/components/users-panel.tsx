@@ -132,7 +132,7 @@ export function UsersPanel({ language }: { language: Language }) {
   }, [fetchUsers]);
 
   const handleCreate = () => {
-    setEditing({ name: "", username: "", email: "", password: "", role: "user", isActive: true });
+    setEditing({ name: "", username: "", email: "", password: "", role: "admin", isActive: true });
     setPermState({ notices: "none", meetings: "none", events: "none" });
     setGenerateTemp(true);
     setEditOpen(true);
@@ -301,7 +301,7 @@ export function UsersPanel({ language }: { language: Language }) {
                       ))}
                     </div>
                     <p className="text-sm text-muted-foreground">
-                      @{user.username} — {user.email}
+                      @{user.username}{user.email && !user.email.endsWith("@local") && ` — ${user.email}`}
                     </p>
                   </div>
                   <div className="flex gap-1 shrink-0">
@@ -357,15 +357,21 @@ export function UsersPanel({ language }: { language: Language }) {
                   value={editing.username || ""}
                   onChange={(e) => setEditing({ ...editing, username: e.target.value })}
                   className="rounded-xl"
+                  disabled={!!editing.id && editing.role === "super_admin"}
+                  readOnly={!!editing.id && editing.role === "super_admin"}
                 />
+                {!!editing.id && editing.role === "super_admin" && (
+                  <p className="text-[11px] text-muted-foreground">Super admin username cannot be changed.</p>
+                )}
               </div>
               <div className="space-y-2">
-                <Label>{t("userEmail", language)}</Label>
+                <Label>{t("userEmail", language)} <span className="text-muted-foreground font-normal">(optional)</span></Label>
                 <Input
                   type="email"
                   value={editing.email || ""}
                   onChange={(e) => setEditing({ ...editing, email: e.target.value })}
                   className="rounded-xl"
+                  placeholder="user@example.com"
                 />
               </div>
               {!editing.id && (
@@ -396,34 +402,32 @@ export function UsersPanel({ language }: { language: Language }) {
               <div className="space-y-2">
                 <Label>{t("userRole", language)}</Label>
                 <Select
-                  value={editing.role || "user"}
+                  value={editing.role || "admin"}
                   onValueChange={(v) => setEditing({ ...editing, role: v })}
+                  disabled={!!editing.id && editing.role === "super_admin"}
                 >
                   <SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="super_admin">
-                      <span className="flex items-center gap-2">
-                        <ShieldCheck className="h-3.5 w-3.5 text-purple-600" /> Super Admin
-                      </span>
-                    </SelectItem>
+                    {editing.role === "super_admin" && (
+                      <SelectItem value="super_admin">
+                        <span className="flex items-center gap-2">
+                          <ShieldCheck className="h-3.5 w-3.5 text-purple-600" /> Super Admin
+                        </span>
+                      </SelectItem>
+                    )}
                     <SelectItem value="admin">
                       <span className="flex items-center gap-2">
                         <Shield className="h-3.5 w-3.5 text-blue-600" /> Admin
-                      </span>
-                    </SelectItem>
-                    <SelectItem value="user">
-                      <span className="flex items-center gap-2">
-                        <User className="h-3.5 w-3.5 text-gray-600" /> User
                       </span>
                     </SelectItem>
                   </SelectContent>
                 </Select>
                 <p className="text-[11px] text-muted-foreground">
                   {editing.role === "super_admin"
-                    ? "Full access — including congregation details and user management."
-                    : editing.role === "admin"
-                      ? "Can upload and manage content, but cannot change congregation details."
-                      : "Access only to the modules granted below."}
+                    ? !!editing.id
+                      ? "Super Admin role cannot be changed."
+                      : "Full access — including congregation details and user management."
+                    : "Can upload and manage content, but cannot change congregation details."}
                 </p>
               </div>
 
