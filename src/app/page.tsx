@@ -469,8 +469,13 @@ export default function PublicNoticeboard() {
       setEditingLink(notice);
     } else {
       setEditingNotice({ ...notice });
-      setShowEditAiSection(false);
       setEditAiPasteText("");
+      // Auto-expand AI section for schedule notices with an image but no content
+      const titleLower = (notice.title || "").toLowerCase();
+      const isSchedule = titleLower.includes("midweek") || titleLower.includes("public talk") || titleLower.includes("schedule");
+      const hasImage = !!notice.fileUrl && isImageFile(notice.fileUrl, notice.fileName);
+      const hasNoContent = !notice.content && !notice.description;
+      setShowEditAiSection(isSchedule && hasImage && hasNoContent);
       setEditOpen(true);
     }
   }, []);
@@ -1916,13 +1921,22 @@ export default function PublicNoticeboard() {
                 </button>
               )}
 
-              {/* AI Prompt section — only for schedule notices with an image */}
+              {/* AI Prompt section — for schedule notices with an image */}
               {editingNotice.fileUrl && isImageFile(editingNotice.fileUrl, editingNotice.fileName) && (() => {
                 const titleLower = (editingNotice.title || "").toLowerCase();
-                const isMidweek = titleLower.includes("midweek");
-                const isPublicTalk = titleLower.includes("public talk");
-                if (!isMidweek && !isPublicTalk) return null;
-                const aiPrompt = isMidweek
+                const contentLower = (editingNotice.content || editingNotice.description || "").toLowerCase();
+                // Detect midweek by title keywords or known midweek field names in content
+                const isMidweek = titleLower.includes("midweek") ||
+                  ["biblereading", "treasurestalk", "treasuresgem", "applyyourself", "livingtalk", "congregationbiblestudy"].some(f => contentLower.includes(f));
+                // Detect public talk by title keywords or known public talk field names in content
+                const isPublicTalk = titleLower.includes("public talk") || titleLower.includes("publictalk") ||
+                  ["talktheme", "wtstudyreader", "speaker:"].some(f => contentLower.includes(f));
+                // Also show if title contains "schedule" and we can't determine the type — default to midweek
+                const isSchedule = isMidweek || isPublicTalk || (titleLower.includes("schedule") && !contentLower.includes("speaker:"));
+                if (!isSchedule) return null;
+                // Default to midweek prompt if we can't tell, prefer specific detection
+                const useMidweek = isMidweek || !isPublicTalk;
+                const aiPrompt = useMidweek
                   ? `Convert the following midweek meeting schedule image into this exact JSON format:\n\n[\n  {\n    "Date": "{YYYY-MM-DD}",\n    "BibleReading": "{Name}",\n    "TreasuresTalk": "{Name}",\n    "TreasuresGem": "{Name}",\n    "ApplyYourself1": "{Name}",\n    "ApplyYourself2": "{Name}",\n    "LivingTalk": "{Name}",\n    "CongregationBibleStudy": "{Name}",\n    "Reader": "{Name}",\n    "Prayer": "{Name}",\n    "Color": "{optional: the background or highlight color of this row/section in the image, as a hex code like #RRGGBB or a color name}"\n  }\n]\n\nReturn ONLY the JSON array, one object per meeting date. If there are multiple dates in the image, include multiple objects in the array. The "Color" field is optional — if you can identify a color associated with each entry in the image (e.g. a colored row, header, or highlight), include it; otherwise omit it.`
                   : `Convert the following public talk schedule image into this exact JSON format:\n\n[\n  {\n    "Date": "{YYYY-MM-DD}",\n    "Speaker": "{Name}",\n    "Congregation": "{Congregation Name}",\n    "TalkTheme": "{Theme Number or Title}",\n    "Chairman": "{Name}",\n    "Prayer": "{Name}",\n    "WTStudyReader": "{Name}"\n  }\n]\n\nReturn ONLY the JSON array, one object per meeting date. If there are multiple dates in the image, include multiple objects in the array.`;
 
@@ -1993,6 +2007,7 @@ export default function PublicNoticeboard() {
                   }
                 };
 
+                const hasNoContent = !editingNotice.content && !editingNotice.description;
                 return (
                   <div className="space-y-2">
                     <button
@@ -2003,6 +2018,7 @@ export default function PublicNoticeboard() {
                       {showEditAiSection ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
                       <Wand2 className="h-3.5 w-3.5" />
                       AI Prompt & Paste
+                      {hasNoContent && <span className="text-teal-600 dark:text-teal-400 font-medium">· recommended</span>}
                     </button>
                     {showEditAiSection && (
                       <div className="space-y-3 rounded-xl border border-border/40 p-3 bg-muted/10">
