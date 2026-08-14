@@ -16,7 +16,9 @@ function createClient(config: ConstructorParameters<typeof PrismaClient>[0]) {
       $allModels: {
         async $allOperations({ model, operation, query, args }) {
           const result = await query(args);
-          if (WRITE_OPS.has(operation) && !SILENT_MODELS.has(model)) bumpDataVersion();
+          if (WRITE_OPS.has(operation) && !SILENT_MODELS.has(model)) {
+            try { bumpDataVersion(); } catch {}
+          }
           return result;
         },
       },

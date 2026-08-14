@@ -181,10 +181,11 @@ export function SettingsPanel({ language = "en", section = "all", onSaved }: { l
           variant: "destructive",
         });
       } else {
-        toast({ title: "Error saving settings", variant: "destructive" });
+        const data = await res.json().catch(() => ({}));
+        toast({ title: "Error saving settings", description: data.error || `Server error (${res.status})`, variant: "destructive" });
       }
     } catch {
-      toast({ title: "Error saving settings", variant: "destructive" });
+      toast({ title: "Error saving settings", description: "Network error — is the server running?", variant: "destructive" });
     } finally {
       setSaving(false);
     }

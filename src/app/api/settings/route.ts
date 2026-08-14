@@ -28,20 +28,25 @@ export async function PUT(request: NextRequest) {
 
     const body = await request.json();
 
-    await db.$transaction(
-      Object.entries(body).map(([key, value]) =>
-        db.setting.upsert({
-          where: { key },
-          update: { value: JSON.stringify(value) },
-          create: { key, value: JSON.stringify(value) },
-        })
-      )
-    );
+    // Validate that body is a non-empty object
+    if (!body || typeof body !== "object" || Object.keys(body).length === 0) {
+      return NextResponse.json({ error: "No settings to save" }, { status: 400 });
+    }
+
+    // Use individual upserts instead of $transaction to avoid issues with extended client
+    for (const [key, value] of Object.entries(body)) {
+      await db.setting.upsert({
+        where: { key },
+        update: { value: JSON.stringify(value) },
+        create: { key, value: JSON.stringify(value) },
+      });
+    }
 
     logAction(auth, "update", "settings", { details: { keys: Object.keys(body) } });
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error("Error updating settings:", error);
-    return NextResponse.json({ error: "Failed to update settings" }, { status: 500 });
+    const message = error instanceof Error ? error.message : "Unknown error";
+    return NextResponse.json({ error: `Failed to update settings: ${message}` }, { status: 500 });
   }
 }
