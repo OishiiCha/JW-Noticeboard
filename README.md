@@ -90,8 +90,8 @@ A standalone digital noticeboard application for congregations — built with Ne
 ### Option 1: Docker (recommended)
 
 ```bash
-# 1. Create a .env file (see .env.example below)
-cp .env .env.local  # then edit values
+# 1. Create a .env file from the template
+cp .env.example .env  # then edit values
 
 # 2. Build and run
 docker compose up -d --build
@@ -234,6 +234,13 @@ The Prisma schema defines these models:
 
 The public noticeboard is viewable without login unless a `noticeboardPasscode` is set in settings.
 
+### Super Admin Protection
+
+- The super admin's **username and role cannot be changed** — not via the UI or the API
+- Super admin accounts **cannot be deleted**
+- New users created by a super admin can only be assigned the **`admin`** role (the `user` role is no longer available for new accounts)
+- These restrictions are enforced both in the frontend (disabled fields) and the backend (API returns 400 errors)
+
 ## API Overview
 
 All API routes are under `/api/`. Key endpoints:
@@ -282,6 +289,57 @@ git pull
 docker compose up -d --build
 ```
 
+### Fast builds with buildx (recommended)
+
+Use `docker buildx build` with GitHub Actions cache for significantly faster rebuilds.
+The included `build.sh` script handles this automatically:
+
+```bash
+# Build for native platform (loads into docker so compose can use it)
+./build.sh
+
+# Then run with compose (uses the cached image, no rebuild needed)
+docker compose up -d
+```
+
+#### `build.sh` options
+
+The script supports environment variables for customization:
+
+| Variable     | Default              | Description                                      |
+| ------------ | -------------------- | ------------------------------------------------ |
+| `IMAGE_NAME` | `noticeboard-app`    | Docker image name                                |
+| `IMAGE_TAG`  | `latest`             | Docker image tag                                 |
+| `PLATFORM`   | *(native)*           | Target platform, e.g. `linux/arm64` or `linux/amd64,linux/arm64` |
+| `PUSH`       | `false`              | Set to `true` to push to a registry              |
+| `LOAD`       | `true`               | Set to `false` to skip loading into docker (auto-disabled for multi-platform) |
+
+Examples:
+
+```bash
+# Build for Raspberry Pi (ARM64)
+PLATFORM=linux/arm64 ./build.sh
+
+# Build with a custom tag
+IMAGE_TAG=v1.2.3 ./build.sh
+
+# Multi-platform build and push to a registry
+PLATFORM=linux/amd64,linux/arm64 PUSH=true IMAGE_NAME=myregistry/noticeboard-app ./build.sh
+```
+
+You can also run buildx directly:
+
+```bash
+# Single-platform build with GHA cache
+docker buildx build --cache-to type=gha --cache-from type=gha -t noticeboard-app:latest .
+
+# Cross-compile for Raspberry Pi (ARM64)
+docker buildx build --platform linux/arm64 --cache-to type=gha --cache-from type=gha -t noticeboard-app:latest .
+
+# Multi-platform build + push to registry
+docker buildx build --platform linux/amd64,linux/arm64 --push -t myregistry/noticeboard-app:latest .
+```
+
 ### Raspberry Pi
 
 The Dockerfile is multi-arch (AMD64 + ARM64) and optimized for Raspberry Pi 5. Build on the Pi directly:
@@ -293,12 +351,69 @@ docker compose up -d --build
 Or use buildx for cross-compilation from another machine:
 
 ```bash
-docker buildx build --platform linux/arm64 -t noticeboard-app .
+docker buildx build --platform linux/arm64 --cache-to type=gha --cache-from type=gha -t noticeboard-app:latest .
 ```
 
 ### Netlify
 
 A `netlify.toml` is included for optional deployment on Netlify (note: SQLite/Prisma requires a persistent volume, so Docker is recommended for production).
+
+## AI Image Processing (Optional)
+
+The app can automatically read schedule images (Midweek Meeting / Public Talk) and fill in all the fields — speaker names, chairmen, prayers, talk themes, etc. — using Google Gemini AI.
+
+### Setup
+
+1. Get a **free** Gemini API key at [aistudio.google.com/apikey](https://aistudio.google.com/apikey)
+2. Sign in with a Google account and click "Create API Key"
+3. Copy the key (starts with `AIza...`)
+4. In the app: **Settings → Display → AI Image Processing (Gemini)** → paste the key → Save
+
+The key is stored in the database (not in `.env`) and is never exposed to non-admin users.
+
+### Usage
+
+When a Gemini API key is configured, schedule modals show an **"Auto-Process with AI"** button:
+
+1. Click **Add → Midweek Schedule** or **Public Talk Schedule**
+2. Upload the schedule image
+3. Expand the **"AI Prompt & Paste"** section
+4. Click **"Auto-Process with AI"** — the image is sent to Gemini, which returns structured JSON
+5. Review the parsed fields and save
+
+### Without an API key (manual mode)
+
+If no key is set, you can still use the manual copy-paste method:
+
+1. Click **"Copy for AI (prompt + image)"** — copies both the prompt text and the image to your clipboard
+2. Paste into any AI chat (ChatGPT, Gemini, Claude, etc.)
+3. Copy the JSON response from the AI
+4. Paste it into the **"Paste AI JSON Output"** field
+5. Click **"Parse & Fill"**
+
+### Free tier limits
+
+Gemini 2.0 Flash free tier: **15 requests/minute**, **1,500 requests/day**. No credit card required. This is more than enough for processing schedule images.
+
+## Environment File
+
+The `.env` file is git-ignored and never affected by `git pull`. A `.env.example` template is tracked in the repo for reference. To set up a new deployment:
+
+```bash
+cp .env.example .env
+# Edit .env with your real values
+```
+
+| Variable                 | Description                              | Default                  |
+| ------------------------ | ---------------------------------------- | ------------------------ |
+| `ADMIN_EMAIL`            | Super admin email (used on first run)    | `admin@example.com`      |
+| `ADMIN_PASSWORD`         | Super admin password (used on first run) | `change-this-password`   |
+| `NEXTAUTH_SECRET`        | Random secret for JWT signing            | *(must change)*          |
+| `NEXTAUTH_URL`           | Public URL of the app                    | `http://localhost:2424`  |
+| `PORT`                   | Port to run on                           | `2424`                   |
+| `SESSION_TIMEOUT_HOURS`  | Session expiry in hours                  | `720` (30 days)          |
+
+> **Note:** The Gemini API key is **not** stored in `.env` — it's stored in the database via the Settings panel.
 
 ## License
 

@@ -15,6 +15,7 @@
 *.env.example text eol=lf
 *.yml text eol=lf
 *.yaml text eol=lf
+*.sh text eol=lf
 
 # Binary files
 *.png binary
