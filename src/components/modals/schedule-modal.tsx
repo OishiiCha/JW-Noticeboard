@@ -5,7 +5,8 @@ import { useScrollLock } from "@/lib/use-scroll-lock";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { X, Loader2, BookOpen, Mic, ClipboardPaste, ChevronDown, ChevronUp, Copy } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { X, Loader2, BookOpen, Mic, ClipboardPaste, ChevronDown, ChevronUp, Copy, AlertTriangle, Calendar } from "lucide-react";
 import { FileUploadZone } from "@/components/shared/file-upload-zone";
 import { WeekSelector } from "@/components/shared/week-selector";
 import { AdvancedOptions, type AdvancedOptionsState } from "@/components/shared/advanced-options";
@@ -24,10 +25,48 @@ function toYMD(d: Date): string {
 }
 
 const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
 interface MeetingEntry {
   date: string;
   content: string;
+}
+
+function parseDateFromText(text: string): string | null {
+  const isoMatch = text.match(/(\d{4})-(\d{2})-(\d{2})/);
+  if (isoMatch) return `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`;
+  const monthDayMatch = text.match(/(\w+)\s+(\d{1,2})/);
+  if (monthDayMatch) {
+    const monthStr = monthDayMatch[1];
+    const day = parseInt(monthDayMatch[2], 10);
+    const monthIdx = MONTH_NAMES.findIndex(m => m.toLowerCase().startsWith(monthStr.toLowerCase().slice(0, 3)));
+    if (monthIdx >= 0 && day >= 1 && day <= 31) {
+      const year = new Date().getFullYear();
+      return `${year}-${String(monthIdx + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    }
+  }
+  const slashMatch = text.match(/(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);
+  if (slashMatch) {
+    const month = parseInt(slashMatch[1], 10);
+    const day = parseInt(slashMatch[2], 10);
+    let year = parseInt(slashMatch[3], 10);
+    if (year < 100) year += 2000;
+    if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+      return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    }
+  }
+  return null;
+}
+
+// Snap a date to the nearest meeting day (0=Sunday, 6=Saturday)
+function snapToMeetingDay(dateStr: string, meetingDay: number): string {
+  const d = new Date(dateStr + "T00:00:00");
+  const currentDay = d.getDay();
+  let diff = meetingDay - currentDay;
+  if (diff < -3) diff += 7;
+  if (diff > 3) diff -= 7;
+  d.setDate(d.getDate() + diff);
+  return toYMD(d);
 }
 
 export function ScheduleModal({ open, onClose, onSaved, variant, categories }: ScheduleModalProps) {
@@ -47,11 +86,19 @@ export function ScheduleModal({ open, onClose, onSaved, variant, categories }: S
   const [showAiPaste, setShowAiPaste] = useState(false);
   const [aiPasteText, setAiPasteText] = useState("");
 
+  // AI-parsed entries with their own dates (like roles modal)
+  const [aiEntries, setAiEntries] = useState<MeetingEntry[]>([]);
+  const [entriesFromAi, setEntriesFromAi] = useState(false);
+
+  // Date conflict dialog
+  const [showDateConflict, setShowDateConflict] = useState(false);
+  const [dateConflicts, setDateConflicts] = useState<{ date: string; expectedDay: string; actualDay: string }[]>([]);
+  const [pendingAiEntries, setPendingAiEntries] = useState<MeetingEntry[]>([]);
+
   const isMidweek = variant === "midweek";
   const title = isMidweek ? "Midweek Meeting Schedule" : "Public Talk Schedule";
   const Icon = isMidweek ? BookOpen : Mic;
 
-  // AI prompt template — different for midweek vs public talk
   const aiPromptTemplate = isMidweek
     ? `Convert the following midweek meeting schedule image into this exact JSON format:\n\n[\n  {\n    "Date": "{YYYY-MM-DD}",\n    "BibleReading": "{Name}",\n    "TreasuresTalk": "{Name}",\n    "TreasuresGem": "{Name}",\n    "ApplyYourself1": "{Name}",\n    "ApplyYourself2": "{Name}",\n    "LivingTalk": "{Name}",\n    "CongregationBibleStudy": "{Name}",\n    "Reader": "{Name}",\n    "Prayer": "{Name}"\n  }\n]\n\nReturn ONLY the JSON array, one object per meeting date. If there are multiple dates in the image, include multiple objects in the array.`
     : `Convert the following public talk schedule image into this exact JSON format:\n\n[\n  {\n    "Date": "{YYYY-MM-DD}",\n    "Speaker": "{Name}",\n    "Congregation": "{Congregation Name}",\n    "TalkTheme": "{Theme Number or Title}",\n    "Chairman": "{Name}",\n    "Prayer": "{Name}",\n    "WTStudyReader": "{Name}"\n  }\n]\n\nReturn ONLY the JSON array, one object per meeting date. If there are multiple dates in the image, include multiple objects in the array.`;
@@ -72,7 +119,9 @@ export function ScheduleModal({ open, onClose, onSaved, variant, categories }: S
 
   useScrollLock(open);
 
+  // Only derive meetingEntries from manualText + selectedWeeks when NOT using AI entries
   useEffect(() => {
+    if (entriesFromAi) return; // AI entries manage themselves
     if (manualText && selectedWeeks.length > 0) {
       const lines = manualText.split("\n");
       const entries: MeetingEntry[] = [];
@@ -113,13 +162,15 @@ export function ScheduleModal({ open, onClose, onSaved, variant, categories }: S
         }));
       }
     }
-  }, [manualText, selectedWeeks, meetingDay]);
+  }, [manualText, selectedWeeks, meetingDay, entriesFromAi]);
 
   const handleUpload = useCallback((result: { url: string; fileName: string; type: string }) => {
     setFileUrl(result.url);
     setFileName(result.fileName);
     setFileType(result.type);
     setMeetingEntries([]);
+    setEntriesFromAi(false);
+    setAiEntries([]);
   }, []);
 
   const resetForm = () => {
@@ -127,16 +178,30 @@ export function ScheduleModal({ open, onClose, onSaved, variant, categories }: S
     setOptions({ isPinned: false, expiresAt: "", showOnCalendar: false, eventStartDate: "", eventEndDate: "", location: "", latitude: null, longitude: null });
     setMeetingEntries([]); setManualText("");
     setShowAiPaste(false); setAiPasteText("");
+    setAiEntries([]); setEntriesFromAi(false);
+    setShowDateConflict(false); setDateConflicts([]); setPendingAiEntries([]);
   };
 
   const updateEntryContent = (idx: number, content: string) => {
-    setMeetingEntries(prev => prev.map((e, i) => i === idx ? { ...e, content } : e));
+    if (entriesFromAi) {
+      setAiEntries(prev => prev.map((e, i) => i === idx ? { ...e, content } : e));
+    } else {
+      setMeetingEntries(prev => prev.map((e, i) => i === idx ? { ...e, content } : e));
+    }
+  };
+
+  const updateEntryDate = (idx: number, date: string) => {
+    setAiEntries(prev => prev.map((e, i) => i === idx ? { ...e, date } : e));
+  };
+
+  const removeEntry = (idx: number) => {
+    setAiEntries(prev => prev.filter((_, i) => i !== idx));
   };
 
   const parseAiOutput = () => {
     if (!aiPasteText.trim()) return;
 
-    let parsedEntries: { date: string; content: string }[] = [];
+    let parsedEntries: MeetingEntry[] = [];
 
     // Try JSON parsing first
     try {
@@ -144,10 +209,11 @@ export function ScheduleModal({ open, onClose, onSaved, variant, categories }: S
       if (Array.isArray(parsed) && parsed.length > 0 && typeof parsed[0] === "object") {
         parsedEntries = parsed.map((obj: Record<string, string>) => {
           const dateStr = obj.Date || obj.date || "";
+          const parsedDate = parseDateFromText(dateStr) || dateStr;
           const roleLines = Object.entries(obj)
             .filter(([k]) => k.toLowerCase() !== "date")
             .map(([k, v]) => `${k}: ${v}`);
-          return { date: dateStr, content: roleLines.join("\n") };
+          return { date: parsedDate, content: roleLines.join("\n") };
         });
       }
     } catch {
@@ -166,7 +232,9 @@ export function ScheduleModal({ open, onClose, onSaved, variant, categories }: S
           if (currentDate && currentContent.length > 0) {
             parsedEntries.push({ date: currentDate, content: currentContent.join("\n").trim() });
           }
-          currentDate = dateMatch[1];
+          const rawDate = dateMatch[1];
+          const parsed = parseDateFromText(rawDate);
+          currentDate = parsed || rawDate;
           currentContent = line.includes(":") && !line.match(/^Date:/i) ? [line] : [];
         } else if (line.trim()) {
           currentContent.push(line);
@@ -178,16 +246,40 @@ export function ScheduleModal({ open, onClose, onSaved, variant, categories }: S
     }
 
     if (parsedEntries.length === 0) {
-      // Just use the raw text
+      // Just use the raw text as a single entry
       setManualText(aiPasteText.trim());
-    } else if (parsedEntries.length === 1) {
-      // Single entry — put into manualText (will be split across selected weeks)
-      setManualText(parsedEntries[0].content);
+      setEntriesFromAi(false);
     } else {
-      // Multiple entries — build a combined text with date headers so the
-      // existing manualText→meetingEntries splitter can pick them up
-      const combined = parsedEntries.map(e => `${e.date}\n${e.content}`).join("\n\n");
-      setManualText(combined);
+      // Sort by date ascending
+      parsedEntries.sort((a, b) => a.date.localeCompare(b.date));
+
+      // Check if dates match the meeting day
+      const conflicts: { date: string; expectedDay: string; actualDay: string }[] = [];
+      for (const entry of parsedEntries) {
+        if (entry.date && /^\d{4}-\d{2}-\d{2}$/.test(entry.date)) {
+          const dayOfWeek = new Date(entry.date + "T00:00:00").getDay();
+          if (dayOfWeek !== meetingDay) {
+            conflicts.push({
+              date: entry.date,
+              expectedDay: DAY_NAMES[meetingDay],
+              actualDay: DAY_NAMES[dayOfWeek],
+            });
+          }
+        }
+      }
+
+      if (conflicts.length > 0) {
+        // Show conflict dialog
+        setPendingAiEntries(parsedEntries);
+        setDateConflicts(conflicts);
+        setShowDateConflict(true);
+      } else {
+        // No conflicts — apply directly
+        setAiEntries(parsedEntries);
+        setEntriesFromAi(true);
+        setManualText("");
+        setSelectedWeeks([]); // AI entries have their own dates, no need for week selector
+      }
     }
 
     setShowAiPaste(false);
@@ -195,34 +287,77 @@ export function ScheduleModal({ open, onClose, onSaved, variant, categories }: S
     toast({ title: `Parsed ${parsedEntries.length || 1} entr${(parsedEntries.length || 1) === 1 ? "y" : "ies"} from AI output` });
   };
 
+  const resolveDateConflicts = (usePastedDates: boolean) => {
+    const resolved = usePastedDates
+      ? pendingAiEntries
+      : pendingAiEntries.map(e => ({
+          date: snapToMeetingDay(e.date, meetingDay),
+          content: e.content,
+        }));
+
+    setAiEntries(resolved);
+    setEntriesFromAi(true);
+    setManualText("");
+    setSelectedWeeks([]);
+    setShowDateConflict(false);
+    setDateConflicts([]);
+    setPendingAiEntries([]);
+    toast({
+      title: usePastedDates
+        ? `Using pasted dates (${resolved.length} entries)`
+        : `Snapped ${resolved.length} entries to ${DAY_NAMES[meetingDay]}`,
+    });
+  };
+
+  // The entries currently being displayed/edited
+  const displayEntries = entriesFromAi ? aiEntries : meetingEntries;
+
   const handleSave = async () => {
-    if (!fileUrl || selectedWeeks.length === 0) return;
+    if (!fileUrl) return;
+    // If using AI entries, they have their own dates — don't require week selection
+    if (!entriesFromAi && selectedWeeks.length === 0) return;
     setSaving(true);
     const category = categories.find(c => c.name === "Meetings");
     try {
-      const useOcrEntries = meetingEntries.length > 0 && meetingEntries.some(e => e.content.trim());
+      let allOcrContent = "";
+      let firstDate: Date;
+      let lastDate: Date;
 
-      // Sort selected weeks to find the full date range
-      const sortedWeeks = [...selectedWeeks].sort();
-      const firstMonday = new Date(sortedWeeks[0] + "T00:00:00");
-      const lastMonday = new Date(sortedWeeks[sortedWeeks.length - 1] + "T00:00:00");
-      const lastSunday = new Date(lastMonday);
-      lastSunday.setDate(lastSunday.getDate() + 6);
+      if (entriesFromAi && aiEntries.length > 0) {
+        // Use AI entry dates directly
+        const sorted = [...aiEntries].sort((a, b) => a.date.localeCompare(b.date));
+        firstDate = new Date(sorted[0].date + "T00:00:00");
+        lastDate = new Date(sorted[sorted.length - 1].date + "T00:00:00");
 
-      // Build a combined description from all meeting entries
-      const allOcrContent = useOcrEntries
-        ? sortedWeeks.map((weekDate, i) => {
-            const monday = new Date(weekDate + "T00:00:00");
-            const meetingDate = new Date(monday);
-            meetingDate.setDate(monday.getDate() + meetingDay);
-            const meetingLabel = `${DAY_NAMES[meetingDay]} ${meetingDate.toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
-            const entry = meetingEntries[i];
-            const content = entry?.content?.trim() || "";
-            return content ? `${meetingLabel}\n${content}` : "";
-          }).filter(Boolean).join("\n\n")
-        : "";
+        allOcrContent = sorted.map(entry => {
+          const d = new Date(entry.date + "T00:00:00");
+          const label = `${DAY_NAMES[d.getDay()]} ${d.toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
+          const content = entry.content?.trim() || "";
+          return content ? `${label}\n${content}` : "";
+        }).filter(Boolean).join("\n\n");
+      } else {
+        // Use selected weeks + meeting entries
+        const useOcrEntries = meetingEntries.length > 0 && meetingEntries.some(e => e.content.trim());
+        const sortedWeeks = [...selectedWeeks].sort();
+        firstDate = new Date(sortedWeeks[0] + "T00:00:00");
+        const lastMonday = new Date(sortedWeeks[sortedWeeks.length - 1] + "T00:00:00");
+        lastDate = new Date(lastMonday);
+        lastDate.setDate(lastDate.getDate() + 6);
 
-      const dateRangeLabel = `${firstMonday.toLocaleDateString("en-US", { month: "short", day: "numeric" })} – ${lastSunday.toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
+        allOcrContent = useOcrEntries
+          ? sortedWeeks.map((weekDate, i) => {
+              const monday = new Date(weekDate + "T00:00:00");
+              const meetingDate = new Date(monday);
+              meetingDate.setDate(monday.getDate() + meetingDay);
+              const meetingLabel = `${DAY_NAMES[meetingDay]} ${meetingDate.toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
+              const entry = meetingEntries[i];
+              const content = entry?.content?.trim() || "";
+              return content ? `${meetingLabel}\n${content}` : "";
+            }).filter(Boolean).join("\n\n")
+          : "";
+      }
+
+      const dateRangeLabel = `${firstDate.toLocaleDateString("en-US", { month: "short", day: "numeric" })} – ${lastDate.toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
 
       const noticeTitle = `${title} — ${dateRangeLabel}`;
       const description = allOcrContent
@@ -240,8 +375,8 @@ export function ScheduleModal({ open, onClose, onSaved, variant, categories }: S
           thumbnailUrl: fileType.includes("pdf") ? null : fileUrl,
           isPinned: options.isPinned, isPublished: true, isPublic: true,
           language: "en", showOnCalendar: options.showOnCalendar,
-          eventStartDate: toYMD(firstMonday),
-          eventEndDate: toYMD(lastSunday),
+          eventStartDate: toYMD(firstDate),
+          eventEndDate: toYMD(lastDate),
           categoryId: category?.id || null,
         }),
       });
@@ -267,6 +402,8 @@ export function ScheduleModal({ open, onClose, onSaved, variant, categories }: S
   };
 
   if (!open) return null;
+
+  const canSave = fileUrl && (entriesFromAi ? aiEntries.length > 0 : selectedWeeks.length > 0);
 
   return (
     <div className="fixed inset-0 z-[90] bg-black/40 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={onClose}>
@@ -338,7 +475,61 @@ export function ScheduleModal({ open, onClose, onSaved, variant, categories }: S
             )}
           </div>
 
-          {(manualText || fileUrl) && (
+          {/* AI-parsed entries — shown as individual cards with editable dates */}
+          {entriesFromAi && aiEntries.length > 0 && (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <Label className="text-xs font-semibold text-muted-foreground">
+                  Parsed entries ({aiEntries.length}):
+                </Label>
+                <button
+                  type="button"
+                  onClick={() => { setEntriesFromAi(false); setAiEntries([]); }}
+                  className="text-xs text-muted-foreground hover:text-foreground"
+                >
+                  Clear & use manual
+                </button>
+              </div>
+              {aiEntries.map((entry, idx) => {
+                const d = entry.date ? new Date(entry.date + "T00:00:00") : null;
+                const dayName = d ? DAY_NAMES[d.getDay()] : "";
+                const isCorrectDay = d && d.getDay() === meetingDay;
+                return (
+                  <div key={idx} className={`rounded-lg border p-2.5 space-y-2 ${isCorrectDay ? "border-border/40" : "border-amber-300 dark:border-amber-700/50"}`}>
+                    <div className="flex items-center gap-2">
+                      <Input
+                        type="date"
+                        value={entry.date}
+                        onChange={(e) => updateEntryDate(idx, e.target.value)}
+                        className="rounded-lg text-xs h-8 flex-shrink-0 w-[140px]"
+                      />
+                      <span className={`text-xs font-medium ${isCorrectDay ? "text-indigo-600" : "text-amber-600"}`}>
+                        {dayName}{!isCorrectDay && d && ` (expected ${DAY_NAMES[meetingDay]})`}
+                      </span>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 w-6 p-0 rounded-md text-muted-foreground hover:text-red-500 ml-auto shrink-0"
+                        onClick={() => removeEntry(idx)}
+                      >
+                        <X className="h-3 w-3" />
+                      </Button>
+                    </div>
+                    <Textarea
+                      value={entry.content}
+                      onChange={(e) => updateEntryContent(idx, e.target.value)}
+                      rows={4}
+                      className="rounded-lg text-xs font-mono"
+                      placeholder="Text for this meeting..."
+                    />
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Manual text mode — only show when not using AI entries */}
+          {!entriesFromAi && (manualText || fileUrl) && (
             <div className="space-y-2">
               <Label className="text-xs font-semibold text-muted-foreground">Schedule text {fileUrl ? "(optional)" : ""}</Label>
               <Textarea
@@ -372,22 +563,78 @@ export function ScheduleModal({ open, onClose, onSaved, variant, categories }: S
             </div>
           )}
 
-          <WeekSelector
-            selectedWeeks={selectedWeeks}
-            onChange={setSelectedWeeks}
-            meetingDay={meetingDay}
-            label={`Which meeting(s) is this for? (${DAY_NAMES[meetingDay]} ${meetingTime})`}
-          />
+          {/* Week selector — hidden when using AI entries (they have their own dates) */}
+          {!entriesFromAi && (
+            <WeekSelector
+              selectedWeeks={selectedWeeks}
+              onChange={setSelectedWeeks}
+              meetingDay={meetingDay}
+              label={`Which meeting(s) is this for? (${DAY_NAMES[meetingDay]} ${meetingTime})`}
+            />
+          )}
           <AdvancedOptions state={options} onChange={setOptions} showCalendar={true} />
         </div>
         <div className="px-5 py-3 border-t border-border/40 shrink-0 flex justify-end gap-2">
           <Button variant="outline" onClick={onClose} className="rounded-xl">Cancel</Button>
-          <Button onClick={handleSave} disabled={!fileUrl || selectedWeeks.length === 0 || saving} className="bg-indigo-600 hover:bg-indigo-700 rounded-xl">
+          <Button onClick={handleSave} disabled={!canSave || saving} className="bg-indigo-600 hover:bg-indigo-700 rounded-xl">
             {saving && <Loader2 className="h-4 w-4 animate-spin mr-1" />}
-            Upload & Post {selectedWeeks.length > 1 ? `(${selectedWeeks.length} weeks)` : ""}
+            Upload & Post {entriesFromAi && aiEntries.length > 1 ? `(${aiEntries.length} entries)` : selectedWeeks.length > 1 ? `(${selectedWeeks.length} weeks)` : ""}
           </Button>
         </div>
       </div>
+
+      {/* Date Conflict Dialog */}
+      {showDateConflict && (
+        <div className="fixed inset-0 z-[95] bg-black/50 flex items-center justify-center p-4" onClick={() => setShowDateConflict(false)}>
+          <div className="bg-card border border-border/40 rounded-2xl shadow-2xl w-full max-w-md p-5 space-y-4" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center gap-3">
+              <div className="h-9 w-9 rounded-xl flex items-center justify-center text-white bg-amber-500 shrink-0">
+                <AlertTriangle className="h-5 w-5" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold">Date Mismatch</h3>
+                <p className="text-xs text-muted-foreground">
+                  {dateConflicts.length} of {pendingAiEntries.length} dates fall on {dateConflicts[0]?.expectedDay} (your meeting day).
+                </p>
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-border/40 bg-muted/20 p-3 max-h-40 overflow-y-auto space-y-1">
+              {dateConflicts.map((c, i) => (
+                <div key={i} className="flex items-center gap-2 text-xs">
+                  <Calendar className="h-3 w-3 text-muted-foreground shrink-0" />
+                  <span className="font-mono">{c.date}</span>
+                  <span className="text-muted-foreground">is a {c.actualDay}</span>
+                  <span className="text-amber-600 font-medium ml-auto">expected {c.expectedDay}</span>
+                </div>
+              ))}
+            </div>
+
+            <div className="flex flex-col gap-2">
+              <Button
+                className="rounded-lg bg-indigo-600 hover:bg-indigo-700"
+                onClick={() => resolveDateConflicts(true)}
+              >
+                Use pasted dates as-is
+              </Button>
+              <Button
+                variant="outline"
+                className="rounded-lg"
+                onClick={() => resolveDateConflicts(false)}
+              >
+                Snap to nearest {DAY_NAMES[meetingDay]}
+              </Button>
+              <Button
+                variant="ghost"
+                className="rounded-lg text-xs"
+                onClick={() => { setShowDateConflict(false); setDateConflicts([]); setPendingAiEntries([]); }}
+              >
+                Cancel
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
