@@ -370,35 +370,63 @@ export function ScheduleModal({ open, onClose, onSaved, variant, categories }: S
 
   const handleSave = async () => {
     // AI entries don't need a file upload; manual mode needs both file + weeks
-    if (entriesFromAi ? aiEntries.length === 0 : (!fileUrl || selectedWeeks.length === 0)) return;    setSaving(true);
+    if (entriesFromAi ? aiEntries.length === 0 : (!fileUrl || selectedWeeks.length === 0)) return;
+    setSaving(true);
     const category = categories.find(c => c.name === "Meetings");
     try {
-      let allOcrContent = "";
-      let firstDate: Date;
-      let lastDate: Date;
-
       if (entriesFromAi && aiEntries.length > 0) {
-        // Use AI entry dates directly
+        // Create a separate notice per AI entry (like roles modal does per week)
         const sorted = [...aiEntries].sort((a, b) => a.date.localeCompare(b.date));
-        firstDate = new Date(sorted[0].date + "T00:00:00");
-        lastDate = new Date(sorted[sorted.length - 1].date + "T00:00:00");
-
-        allOcrContent = sorted.map(entry => {
+        for (const entry of sorted) {
+          if (!entry.date) continue;
           const d = new Date(entry.date + "T00:00:00");
-          const label = `${DAY_NAMES[d.getDay()]} ${d.toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
+          const dateLabel = d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
           const content = entry.content?.trim() || "";
-          return content ? `${label}\n${content}` : "";
-        }).filter(Boolean).join("\n\n");
+          const noticeTitle = `${title} — ${dateLabel}`;
+          const description = content
+            ? `${isMidweek ? "Midweek meeting" : "Public talk"} schedule for ${dateLabel}\n\n${content}`
+            : `${isMidweek ? "Midweek meeting" : "Public talk"} schedule for ${dateLabel}`;
+
+          const res = await fetch("/api/notices", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              title: noticeTitle,
+              description,
+              content: content || undefined,
+              type: fileUrl ? "file" : "text",
+              fileUrl: fileUrl || undefined,
+              fileName: fileName || undefined,
+              thumbnailUrl: fileUrl && !fileType.includes("pdf") ? fileUrl : null,
+              isPinned: options.isPinned, isPublished: true, isPublic: true,
+              language: "en", showOnCalendar: options.showOnCalendar,
+              eventStartDate: entry.date,
+              eventEndDate: entry.date,
+              categoryId: category?.id || null,
+            }),
+          });
+
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            const msg = err.error || `Failed to post (HTTP ${res.status})`;
+            if (res.status === 401) {
+              toast({ title: "Authentication required", description: "Please log in and try again.", variant: "destructive" });
+            } else {
+              toast({ title: "Failed to post schedule", description: msg, variant: "destructive" });
+            }
+            return;
+          }
+        }
       } else {
-        // Use selected weeks + meeting entries
+        // Manual mode: single notice with combined content (existing behavior)
         const useOcrEntries = meetingEntries.length > 0 && meetingEntries.some(e => e.content.trim());
         const sortedWeeks = [...selectedWeeks].sort();
-        firstDate = new Date(sortedWeeks[0] + "T00:00:00");
+        const firstDate = new Date(sortedWeeks[0] + "T00:00:00");
         const lastMonday = new Date(sortedWeeks[sortedWeeks.length - 1] + "T00:00:00");
-        lastDate = new Date(lastMonday);
+        const lastDate = new Date(lastMonday);
         lastDate.setDate(lastDate.getDate() + 6);
 
-        allOcrContent = useOcrEntries
+        const allOcrContent = useOcrEntries
           ? sortedWeeks.map((weekDate, i) => {
               const monday = new Date(weekDate + "T00:00:00");
               const meetingDate = new Date(monday);
@@ -409,46 +437,46 @@ export function ScheduleModal({ open, onClose, onSaved, variant, categories }: S
               return content ? `${meetingLabel}\n${content}` : "";
             }).filter(Boolean).join("\n\n")
           : "";
-      }
 
-      const dateRangeLabel = `${firstDate.toLocaleDateString("en-US", { month: "short", day: "numeric" })} – ${lastDate.toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
+        const dateRangeLabel = `${firstDate.toLocaleDateString("en-US", { month: "short", day: "numeric" })} – ${lastDate.toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
+        const noticeTitle = `${title} — ${dateRangeLabel}`;
+        const description = allOcrContent
+          ? `${isMidweek ? "Midweek meeting" : "Public talk"} schedule for ${dateRangeLabel}\n\n${allOcrContent}`
+          : `${isMidweek ? "Midweek meeting" : "Public talk"} schedule for ${dateRangeLabel}`;
 
-      const noticeTitle = `${title} — ${dateRangeLabel}`;
-      const description = allOcrContent
-        ? `${isMidweek ? "Midweek meeting" : "Public talk"} schedule for ${dateRangeLabel}\n\n${allOcrContent}`
-        : `${isMidweek ? "Midweek meeting" : "Public talk"} schedule for ${dateRangeLabel}`;
+        const res = await fetch("/api/notices", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            title: noticeTitle,
+            description,
+            content: allOcrContent || undefined,
+            type: fileUrl ? "file" : "text",
+            fileUrl: fileUrl || undefined,
+            fileName: fileName || undefined,
+            thumbnailUrl: fileUrl && !fileType.includes("pdf") ? fileUrl : null,
+            isPinned: options.isPinned, isPublished: true, isPublic: true,
+            language: "en", showOnCalendar: options.showOnCalendar,
+            eventStartDate: toYMD(firstDate),
+            eventEndDate: toYMD(lastDate),
+            categoryId: category?.id || null,
+          }),
+        });
 
-      const res = await fetch("/api/notices", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title: noticeTitle,
-          description,
-          content: allOcrContent || undefined,
-          type: fileUrl ? "file" : "text",
-          fileUrl: fileUrl || undefined,
-          fileName: fileName || undefined,
-          thumbnailUrl: fileUrl && !fileType.includes("pdf") ? fileUrl : null,
-          isPinned: options.isPinned, isPublished: true, isPublic: true,
-          language: "en", showOnCalendar: options.showOnCalendar,
-          eventStartDate: toYMD(firstDate),
-          eventEndDate: toYMD(lastDate),
-          categoryId: category?.id || null,
-        }),
-      });
-
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        const msg = err.error || `Failed to post (HTTP ${res.status})`;
-        if (res.status === 401) {
-          toast({ title: "Authentication required", description: "Please log in and try again.", variant: "destructive" });
-        } else {
-          toast({ title: "Failed to post schedule", description: msg, variant: "destructive" });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          const msg = err.error || `Failed to post (HTTP ${res.status})`;
+          if (res.status === 401) {
+            toast({ title: "Authentication required", description: "Please log in and try again.", variant: "destructive" });
+          } else {
+            toast({ title: "Failed to post schedule", description: msg, variant: "destructive" });
+          }
+          return;
         }
-        return;
       }
 
-      toast({ title: "Schedule posted" });
+      const count = entriesFromAi ? aiEntries.length : 1;
+      toast({ title: `Schedule posted (${count} ${count === 1 ? "entry" : "entries"})` });
       onSaved(); onClose(); resetForm();
     } catch {
       toast({ title: "Error saving", description: "Network error — please try again.", variant: "destructive" });
