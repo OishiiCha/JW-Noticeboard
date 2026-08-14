@@ -31,18 +31,37 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "AI processing is not configured" }, { status: 400 });
     }
 
-    // Resolve the image URL to an absolute URL
-    const baseUrl = process.env.NEXTAUTH_URL || `http://localhost:${process.env.PORT || 2424}`;
-    const absoluteImageUrl = imageUrl.startsWith("http") ? imageUrl : `${baseUrl}${imageUrl.startsWith("/") ? "" : "/"}${imageUrl}`;
+    // Resolve the image — fetch directly from DB if it's a /api/files/ URL,
+    // otherwise fetch via HTTP
+    let imgBuffer: Buffer;
+    let mimeType: string;
 
-    // Fetch the image and convert to base64
-    const imgRes = await fetch(absoluteImageUrl);
-    if (!imgRes.ok) {
-      return NextResponse.json({ error: "Failed to fetch image" }, { status: 500 });
+    if (imageUrl.startsWith("/api/files/")) {
+      // Extract file ID and fetch directly from database (no HTTP roundtrip needed)
+      const fileId = imageUrl.replace("/api/files/", "").split("/")[0].split("?")[0];
+      const file = await db.uploadedFile.findUnique({
+        where: { id: fileId },
+        select: { data: true, mimeType: true },
+      });
+      if (!file || !file.data) {
+        return NextResponse.json({ error: "Image file not found in database" }, { status: 404 });
+      }
+      imgBuffer = Buffer.from(file.data);
+      mimeType = file.mimeType || "image/png";
+    } else {
+      // External URL or disk path — fetch via HTTP
+      const baseUrl = process.env.NEXTAUTH_URL || `http://localhost:${process.env.PORT || 2424}`;
+      const absoluteImageUrl = imageUrl.startsWith("http") ? imageUrl : `${baseUrl}${imageUrl.startsWith("/") ? "" : "/"}${imageUrl}`;
+      const imgRes = await fetch(absoluteImageUrl);
+      if (!imgRes.ok) {
+        return NextResponse.json({ error: `Failed to fetch image (${imgRes.status})` }, { status: 500 });
+      }
+      const arrayBuffer = await imgRes.arrayBuffer();
+      imgBuffer = Buffer.from(arrayBuffer);
+      mimeType = imgRes.headers.get("content-type") || "image/png";
     }
-    const imgBuffer = await imgRes.arrayBuffer();
-    const imgBase64 = Buffer.from(imgBuffer).toString("base64");
-    const mimeType = imgRes.headers.get("content-type") || "image/png";
+
+    const imgBase64 = imgBuffer.toString("base64");
 
     // Call Gemini API (gemini-2.0-flash — free tier)
     const geminiRes = await fetch(
