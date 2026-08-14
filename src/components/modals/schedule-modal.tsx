@@ -313,10 +313,8 @@ export function ScheduleModal({ open, onClose, onSaved, variant, categories }: S
   const displayEntries = entriesFromAi ? aiEntries : meetingEntries;
 
   const handleSave = async () => {
-    if (!fileUrl) return;
-    // If using AI entries, they have their own dates — don't require week selection
-    if (!entriesFromAi && selectedWeeks.length === 0) return;
-    setSaving(true);
+    // AI entries don't need a file upload; manual mode needs both file + weeks
+    if (entriesFromAi ? aiEntries.length === 0 : (!fileUrl || selectedWeeks.length === 0)) return;    setSaving(true);
     const category = categories.find(c => c.name === "Meetings");
     try {
       let allOcrContent = "";
@@ -371,8 +369,10 @@ export function ScheduleModal({ open, onClose, onSaved, variant, categories }: S
           title: noticeTitle,
           description,
           content: allOcrContent || undefined,
-          type: "file", fileUrl, fileName,
-          thumbnailUrl: fileType.includes("pdf") ? null : fileUrl,
+          type: fileUrl ? "file" : "text",
+          fileUrl: fileUrl || undefined,
+          fileName: fileName || undefined,
+          thumbnailUrl: fileUrl && !fileType.includes("pdf") ? fileUrl : null,
           isPinned: options.isPinned, isPublished: true, isPublic: true,
           language: "en", showOnCalendar: options.showOnCalendar,
           eventStartDate: toYMD(firstDate),
@@ -403,7 +403,7 @@ export function ScheduleModal({ open, onClose, onSaved, variant, categories }: S
 
   if (!open) return null;
 
-  const canSave = fileUrl && (entriesFromAi ? aiEntries.length > 0 : selectedWeeks.length > 0);
+  const canSave = entriesFromAi ? aiEntries.length > 0 : (fileUrl && selectedWeeks.length > 0);
 
   return (
     <div className="fixed inset-0 z-[90] bg-black/40 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={onClose}>
