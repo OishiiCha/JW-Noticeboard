@@ -974,7 +974,7 @@ export default function PublicNoticeboard() {
   const pinnedNotices = notices.filter(n => n.isPinned);
   // Identify schedule notices by title (not category, since categories may not exist)
   const isScheduleNotice = (n: Notice) =>
-    n.type === "file" && n.fileUrl && n.eventStartDate &&
+    n.eventStartDate &&
     n.title.toLowerCase().includes("schedule") && !n.isArchived && n.isPublished !== false;
   const midweekSchedules = notices.filter(n => isScheduleNotice(n) && n.title.toLowerCase().includes("midweek"))
     .sort((a, b) => (a.eventStartDate || "").localeCompare(b.eventStartDate || ""));
