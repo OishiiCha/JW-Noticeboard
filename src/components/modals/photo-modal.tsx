@@ -30,13 +30,13 @@ export function PhotoModal({ open, onClose, onSaved, categories }: PhotoModalPro
   const [title, setTitle] = useState("");
   const [caption, setCaption] = useState("");
   const [options, setOptions] = useState<AdvancedOptionsState>({
-    isPinned: false, expiresAt: "", showOnCalendar: false, eventStartDate: "", eventEndDate: "", location: "", latitude: null, longitude: null,
+    isPinned: false, expiresAt: "", showOnCalendar: false, eventStartDate: "", eventEndDate: "", location: "", latitude: null, longitude: null, isPublished: true,
   });
   const [saving, setSaving] = useState(false);
 
   const resetForm = () => {
     setImages([]); setTitle(""); setCaption("");
-    setOptions({ isPinned: false, expiresAt: "", showOnCalendar: false, eventStartDate: "", eventEndDate: "", location: "", latitude: null, longitude: null });
+    setOptions({ isPinned: false, expiresAt: "", showOnCalendar: false, eventStartDate: "", eventEndDate: "", location: "", latitude: null, longitude: null, isPublished: true });
   };
 
   const handleSaveDraft = async () => {

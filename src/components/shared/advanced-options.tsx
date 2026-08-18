@@ -21,6 +21,7 @@ export interface AdvancedOptionsState {
   location: string;
   latitude: number | null;
   longitude: number | null;
+  isPublished: boolean;
 }
 
 interface AdvancedOptionsProps {
@@ -30,6 +31,7 @@ interface AdvancedOptionsProps {
   showExpiry?: boolean;
   showCalendar?: boolean;
   showLocation?: boolean;
+  showPublished?: boolean;
 }
 
 function toYMD(d: Date): string {
@@ -49,11 +51,12 @@ export function AdvancedOptions({
   showExpiry = true,
   showCalendar = true,
   showLocation = true,
+  showPublished = false,
 }: AdvancedOptionsProps) {
   const [expanded, setExpanded] = useState(false);
   const [locationEnabled, setLocationEnabled] = useState(!!state.location);
 
-  const hasAnyOption = showPin || showExpiry || showCalendar || showLocation;
+  const hasAnyOption = showPin || showExpiry || showCalendar || showLocation || showPublished;
   if (!hasAnyOption) return null;
 
   // Build the DateRange for the calendar from state
@@ -101,6 +104,16 @@ export function AdvancedOptions({
 
       {expanded && (
         <div className="space-y-3 rounded-xl border border-border/40 p-3 bg-muted/10">
+          {showPublished && (
+            <div className="flex items-center justify-between">
+              <Label className="text-sm cursor-pointer">Published</Label>
+              <Switch
+                checked={state.isPublished !== false}
+                onCheckedChange={(v) => onChange({ ...state, isPublished: v })}
+              />
+            </div>
+          )}
+
           {showPin && (
             <div className="flex items-center justify-between">
               <Label className="text-sm cursor-pointer">Pin to top</Label>

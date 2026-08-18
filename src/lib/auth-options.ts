@@ -2,7 +2,6 @@ import { NextAuthOptions } from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
 import { compare } from "bcryptjs";
 import { db } from "./db";
-import { rateLimit, rateLimitReset } from "./rate-limit";
 
 export const authOptions: NextAuthOptions = {
   providers: [
@@ -17,17 +16,14 @@ export const authOptions: NextAuthOptions = {
           return null;
         }
 
-        const rateKey = `login:${credentials.username.toLowerCase()}`;
-        if (!rateLimit(rateKey)) {
-          throw new Error("Too many login attempts. Please try again later.");
-        }
+        const rawUsername = credentials.username.trim();
 
         let user = await db.user.findUnique({
-          where: { username: credentials.username },
+          where: { username: rawUsername },
         });
         if (!user) {
           user = await db.user.findUnique({
-            where: { email: credentials.username },
+            where: { email: rawUsername.toLowerCase() },
           });
         }
 
@@ -35,12 +31,15 @@ export const authOptions: NextAuthOptions = {
           return null;
         }
 
+        // Check if account is locked
+        if (user.lockedUntil && user.lockedUntil > new Date()) {
+          return null;
+        }
+
         const isValid = await compare(credentials.password, user.password);
         if (!isValid) {
           return null;
         }
-
-        rateLimitReset(rateKey);
 
         return {
           id: user.id,

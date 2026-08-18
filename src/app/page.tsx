@@ -69,6 +69,10 @@ import {
   Type,
   ClipboardPaste,
   Wand2,
+  Star,
+  ShieldCheck,
+  History,
+  Printer,
 } from "lucide-react";
 import { t } from "@/lib/i18n";
 import dynamic from "next/dynamic";
@@ -87,12 +91,15 @@ import { EditLinkModal } from "@/components/modals/edit-link-modal";
 import { MediaModal } from "@/components/modals/media-modal";
 import { WeeklyRolesModal } from "@/components/modals/weekly-roles-modal";
 import { SpecialEventModal } from "@/components/modals/special-event-modal";
-import { NoticeDetailModal } from "@/components/modals/notice-detail-modal";
+import { NoticeDetailModal, ScheduleContentDisplay } from "@/components/modals/notice-detail-modal";
 import { UsersPanel } from "@/components/users-panel";
+import { LogsPanel } from "@/components/admin/logs-panel";
+import { ReportsPanel } from "@/components/admin/reports-panel";
 import { EventsPanel } from "@/components/events-panel";
 import { LazyImage } from "@/components/lazy-image";
 import { AdvancedOptions as AdvancedOptionsFields, type AdvancedOptionsState } from "@/components/shared/advanced-options";
 import { CalendarClock as CalendarCountdown, Heart, Bookmark, Image as ImageIcon } from "lucide-react";
+import { getFieldConfig, parseScheduleFields as parseScheduleFieldsShared, isScheduleContent, MIDWEEK_FIELD_TEMPLATES, PUBLIC_TALK_FIELD_TEMPLATES, type ScheduleVariant } from "@/lib/schedule-field-config";
 import {
   Dialog,
   DialogContent,
@@ -397,7 +404,7 @@ export default function PublicNoticeboard() {
   const [changePwConfirm, setChangePwConfirm] = useState("");
   const [changePwError, setChangePwError] = useState("");
   const [changePwLoading, setChangePwLoading] = useState(false);
-  const [settingsTab, setSettingsTab] = useState<"meetings" | "display" | "conventions" | "map" | "events" | "files" | "backup" | "users">("meetings");
+  const [settingsTab, setSettingsTab] = useState<"meetings" | "display" | "conventions" | "map" | "events" | "files" | "backup" | "users" | "reports" | "logs">("meetings");
   const [theme, setTheme] = useState<"light" | "dark" | "modern">("light");
   const [themeDropdownOpen, setThemeDropdownOpen] = useState(false);
   const [settings, setSettings] = useState<Record<string, string>>({});
@@ -444,6 +451,7 @@ export default function PublicNoticeboard() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showAddPicker, setShowAddPicker] = useState(false);
   const [showScheduleModal, setShowScheduleModal] = useState<null | "midweek" | "public-talk">(null);
+  const [editingSchedule, setEditingSchedule] = useState<Notice | null>(null);
   const [showMediaModal, setShowMediaModal] = useState<null | { defaultCategoryId?: string; defaultTitle?: string } | true>(null);
   const [showAnnouncementModal, setShowAnnouncementModal] = useState(false);
   const [showLinkModal, setShowLinkModal] = useState(false);
@@ -468,6 +476,14 @@ export default function PublicNoticeboard() {
     setDetailNotice(null);
     if (notice.type === "link") {
       setEditingLink(notice);
+    } else if (
+      (notice.title || "").startsWith("Midweek Meeting Schedule") ||
+      (notice.title || "").startsWith("Public Talk Schedule") ||
+      isScheduleContent(notice.content || notice.description || "")
+    ) {
+      // Schedule notices edit in the schedule modal with the editable field list
+      setEditingSchedule(notice);
+      setShowScheduleModal((notice.title || "").startsWith("Public Talk Schedule") ? "public-talk" : "midweek");
     } else {
       setEditingNotice({ ...notice });
       setEditAiPasteText("");
@@ -1618,6 +1634,7 @@ export default function PublicNoticeboard() {
                 <PinnedScheduleStrip
                   midweekSchedules={midweekSchedules}
                   publicTalkSchedules={publicTalkSchedules}
+                  meetings={upcomingMeetings}
                   language={language}
                   isAdmin={isAdmin}
                   onOpenPdf={openPdf}
@@ -1629,6 +1646,13 @@ export default function PublicNoticeboard() {
                   weekendDay={parseInt(String(settings.weekendDay ?? "0"), 10)}
                 />
               )}
+
+              {/* This week at a glance — roles and upcoming events */}
+              <ThisWeekGlance
+                roles={roles}
+                events={upcomingEvents}
+                onOpenPhoto={openPhoto}
+              />
 
               {/* Pinned Notices */}
           {pinnedNotices.filter(filterFn).length > 0 && (
@@ -1924,21 +1948,20 @@ export default function PublicNoticeboard() {
                 </button>
               )}
 
-              {/* AI Prompt section — for schedule notices with an image */}
+              {/* AI Prompt section — for any image upload, with schedule detection */}
               {editingNotice.fileUrl && isImageFile(editingNotice.fileUrl, editingNotice.fileName) && (() => {
                 const titleLower = (editingNotice.title || "").toLowerCase();
                 const contentLower = (editingNotice.content || editingNotice.description || "").toLowerCase();
                 // Detect midweek by title keywords or known midweek field names in content
-                const isMidweek = titleLower.includes("midweek") ||
+                const isMidweekSchedule = titleLower.includes("midweek") ||
                   ["biblereading", "treasurestalk", "treasuresgem", "applyyourself", "livingtalk", "congregationbiblestudy"].some(f => contentLower.includes(f));
                 // Detect public talk by title keywords or known public talk field names in content
-                const isPublicTalk = titleLower.includes("public talk") || titleLower.includes("publictalk") ||
+                const isPublicTalkSchedule = titleLower.includes("public talk") || titleLower.includes("publictalk") ||
                   ["talktheme", "wtstudyreader", "speaker:"].some(f => contentLower.includes(f));
-                // Also show if title contains "schedule" and we can't determine the type — default to midweek
-                const isSchedule = isMidweek || isPublicTalk || (titleLower.includes("schedule") && !contentLower.includes("speaker:"));
-                if (!isSchedule) return null;
-                // Default to midweek prompt if we can't tell, prefer specific detection
-                const useMidweek = isMidweek || !isPublicTalk;
+                // Also show if title contains "schedule"
+                const isSchedule = isMidweekSchedule || isPublicTalkSchedule || titleLower.includes("schedule");
+                // Default variant: auto-detect, default to midweek
+                const useMidweek = isMidweekSchedule || !isPublicTalkSchedule;
                 const aiPrompt = useMidweek
                   ? `Convert the following midweek meeting schedule image into this exact JSON format:\n\n[\n  {\n    "Date": "{YYYY-MM-DD}",\n    "BibleReading": "{Name}",\n    "TreasuresTalk": "{Name}",\n    "TreasuresGem": "{Name}",\n    "ApplyYourself1": "{Name}",\n    "ApplyYourself2": "{Name}",\n    "LivingTalk": "{Name}",\n    "CongregationBibleStudy": "{Name}",\n    "Reader": "{Name}",\n    "Prayer": "{Name}",\n    "Color": "{optional: the background or highlight color of this row/section in the image, as a hex code like #RRGGBB or a color name}"\n  }\n]\n\nReturn ONLY the JSON array, one object per meeting date. If there are multiple dates in the image, include multiple objects in the array. The "Color" field is optional — if you can identify a color associated with each entry in the image (e.g. a colored row, header, or highlight), include it; otherwise omit it.`
                   : `Convert the following public talk schedule image into this exact JSON format:\n\n[\n  {\n    "Date": "{YYYY-MM-DD}",\n    "Speaker": "{Name}",\n    "Congregation": "{Congregation Name}",\n    "TalkTheme": "{Theme Number or Title}",\n    "Chairman": "{Name}",\n    "Prayer": "{Name}",\n    "WTStudyReader": "{Name}"\n  }\n]\n\nReturn ONLY the JSON array, one object per meeting date. If there are multiple dates in the image, include multiple objects in the array.`;
@@ -2000,13 +2023,24 @@ export default function PublicNoticeboard() {
                   try {
                     const parsed = JSON.parse(cleanText);
                     if (Array.isArray(parsed) && parsed.length > 0) {
-                      // Build content string from all entries
+                      const template = useMidweek ? MIDWEEK_FIELD_TEMPLATES : PUBLIC_TALK_FIELD_TEMPLATES;
+                      const orderMap = new Map(template.map((k, i) => [k, i]));
+                      // Build content string from all entries, with fields sorted by template order
                       const lines: string[] = [];
                       for (const obj of parsed) {
                         const dateStr = obj.Date || obj.date || "";
                         const fields = Object.entries(obj)
                           .filter(([k]) => k.toLowerCase() !== "date" && k.toLowerCase() !== "color")
-                          .map(([k, v]) => `${k}: ${v || ""}`);
+                          .map(([k, v]) => ({ key: k, value: String(v || "") }))
+                          .sort((a, b) => {
+                            const aIdx = orderMap.get(a.key);
+                            const bIdx = orderMap.get(b.key);
+                            if (aIdx !== undefined && bIdx !== undefined) return aIdx - bIdx;
+                            if (aIdx !== undefined) return -1;
+                            if (bIdx !== undefined) return 1;
+                            return 0;
+                          })
+                          .map(f => f.value.trim() ? `${f.key}: ${f.value}` : f.key);
                         if (dateStr) {
                           const d = new Date(dateStr + "T00:00:00");
                           if (!isNaN(d.getTime())) {
@@ -2049,12 +2083,23 @@ export default function PublicNoticeboard() {
                     try {
                       const parsed = JSON.parse(cleanText);
                       if (Array.isArray(parsed) && parsed.length > 0) {
+                        const template = useMidweek ? MIDWEEK_FIELD_TEMPLATES : PUBLIC_TALK_FIELD_TEMPLATES;
+                        const orderMap = new Map(template.map((k, i) => [k, i]));
                         const lines: string[] = [];
                         for (const obj of parsed) {
                           const dateStr = obj.Date || obj.date || "";
                           const fields = Object.entries(obj)
                             .filter(([k]) => k.toLowerCase() !== "date" && k.toLowerCase() !== "color")
-                            .map(([k, v]) => `${k}: ${v || ""}`);
+                            .map(([k, v]) => ({ key: k, value: String(v || "") }))
+                            .sort((a, b) => {
+                              const aIdx = orderMap.get(a.key);
+                              const bIdx = orderMap.get(b.key);
+                              if (aIdx !== undefined && bIdx !== undefined) return aIdx - bIdx;
+                              if (aIdx !== undefined) return -1;
+                              if (bIdx !== undefined) return 1;
+                              return 0;
+                            })
+                            .map(f => f.value.trim() ? `${f.key}: ${f.value}` : f.key);
                           if (dateStr) {
                             const d = new Date(dateStr + "T00:00:00");
                             if (!isNaN(d.getTime())) {
@@ -2089,8 +2134,8 @@ export default function PublicNoticeboard() {
                     >
                       {showEditAiSection ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
                       <Wand2 className="h-3.5 w-3.5" />
-                      AI Prompt & Paste
-                      {hasNoContent && <span className="text-teal-600 dark:text-teal-400 font-medium">· recommended</span>}
+                      AI Image Processing
+                      {isSchedule && hasNoContent && <span className="text-teal-600 dark:text-teal-400 font-medium">· recommended</span>}
                     </button>
                     {showEditAiSection && (
                       <div className="space-y-3 rounded-xl border border-border/40 p-3 bg-muted/10">
@@ -2258,7 +2303,9 @@ export default function PublicNoticeboard() {
                   location: editingNotice.location || "",
                   latitude: editingNotice.latitude ?? null,
                   longitude: editingNotice.longitude ?? null,
+                  isPublished: editingNotice.isPublished !== false,
                 }}
+                showPublished={true}
                 onChange={(s: AdvancedOptionsState) => setEditingNotice({
                   ...editingNotice,
                   isPinned: s.isPinned,
@@ -2269,15 +2316,9 @@ export default function PublicNoticeboard() {
                   location: s.location || null,
                   latitude: s.latitude,
                   longitude: s.longitude,
+                  isPublished: s.isPublished,
                 })}
               />
-              <div className="flex items-center justify-between rounded-xl border border-border/40 p-3">
-                <Label className="cursor-pointer">Published</Label>
-                <Switch
-                  checked={editingNotice.isPublished !== false}
-                  onCheckedChange={(v) => setEditingNotice({ ...editingNotice, isPublished: v })}
-                />
-              </div>
             </div>
           )}
           <DialogFooter>
@@ -2299,11 +2340,21 @@ export default function PublicNoticeboard() {
       {/* Specialized Modals */}
       <ScheduleModal
         open={!!showScheduleModal}
-        onClose={() => setShowScheduleModal(null)}
-        onSaved={() => { setShowScheduleModal(null); pushNotification("Schedule saved", "new"); fetchData(); }}
+        onClose={() => { setShowScheduleModal(null); setEditingSchedule(null); }}
+        onSaved={() => { setShowScheduleModal(null); setEditingSchedule(null); pushNotification("Schedule saved", "new"); fetchData(); }}
         variant={showScheduleModal === "public-talk" ? "public-talk" : "midweek"}
         categories={categories.map(c => ({ id: c.id, name: c.name }))}
         aiEnabled={!!settings.geminiApiKey}
+        editNotice={editingSchedule ? {
+          id: editingSchedule.id,
+          title: editingSchedule.title,
+          content: editingSchedule.content ?? null,
+          description: editingSchedule.description ?? null,
+          eventStartDate: editingSchedule.eventStartDate ?? null,
+          eventEndDate: editingSchedule.eventEndDate ?? null,
+          fileUrl: editingSchedule.fileUrl ?? null,
+          fileName: editingSchedule.fileName ?? null,
+        } : null}
       />
       <WeeklyRolesModal
         open={showWeeklyRolesModal}
@@ -2860,7 +2911,7 @@ export default function PublicNoticeboard() {
           ? detailExpanded
             ? "max-w-[100vw] sm:max-w-[98vw] w-full h-[100vh] sm:h-[98vh] max-h-[100vh] sm:max-h-[98vh] p-0 gap-0 overflow-hidden rounded-none sm:rounded-2xl [&>button]:hidden"
             : "max-md:max-w-[100vw] max-md:rounded-none max-md:h-[100vh] max-md:max-h-[100vh] sm:max-w-3xl sm:h-[70vh] w-full max-h-[92vh] p-0 gap-0 overflow-hidden rounded-2xl [&>button]:hidden"
-          : "max-w-2xl sm:max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl"
+          : "max-w-2xl sm:max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl gap-0"
         }>
           {detailNotice && (() => {
             const n = detailNotice;
@@ -2872,7 +2923,7 @@ export default function PublicNoticeboard() {
             const images = getNoticeImages(n);
             const hasMedia = isPdf || images.length > 0;
 
-            const details = (
+            const detailsBody = (
               <div className="space-y-4">
                 {/* Category + pinned */}
                 <div className="flex items-center gap-2 flex-wrap">
@@ -2888,15 +2939,11 @@ export default function PublicNoticeboard() {
                   )}
                 </div>
 
-                {/* Description */}
-                {description && (
-                  <p className="text-sm text-foreground/80 leading-relaxed">{description}</p>
-                )}
+                {/* Description — structured blocks for schedules, plain text otherwise */}
+                {description && <ScheduleContentDisplay text={description} plainClassName="text-sm text-foreground/80 leading-relaxed" />}
 
-                {/* Text content */}
-                {!hasMedia && !n.fileUrl && n.content && (
-                  <p className="text-sm text-foreground/80 whitespace-pre-wrap leading-relaxed">{n.content}</p>
-                )}
+                {/* Text content — schedules show their list even with an image attached */}
+                {n.content && (!hasMedia || !n.fileUrl || isScheduleContent(n.content)) && <ScheduleContentDisplay text={n.content} plainClassName="text-sm text-foreground/80 leading-relaxed" whitespacePreWrap />}
 
                 {/* Countdown */}
                 {n.eventStartDate && (() => {
@@ -2945,11 +2992,18 @@ export default function PublicNoticeboard() {
                     {n.linkLabel || n.linkUrl}
                   </a>
                 )}
+              </div>
+            );
 
-                {/* Footer with actions */}
-                <div className="flex items-center justify-between pt-4 border-t border-border/40">
+            const detailsFooter = (
+              <div className="flex items-center justify-between w-full">
                   <span className="text-xs text-muted-foreground">{timeAgo(n.updatedAt || n.createdAt, language)}</span>
                   <div className="flex items-center gap-1">
+                    {isScheduleContent(n.content || n.description || "") && (
+                      <Button variant="ghost" size="sm" className="h-8 w-8 p-0 rounded-lg" onClick={() => printScheduleNotice(title, n.content || n.description || "")} title="Print schedule">
+                        <Printer className="h-4 w-4" />
+                      </Button>
+                    )}
                     <Button variant="ghost" size="sm" className="h-8 w-8 p-0 rounded-lg" onClick={() => shareUrl(`/notice/${n.id}`, title, settings.siteDomain)}>
                       <Share2 className="h-4 w-4" />
                     </Button>
@@ -2979,16 +3033,18 @@ export default function PublicNoticeboard() {
                     )}
                   </div>
                 </div>
-              </div>
             );
 
             if (!hasMedia) {
               return (
                 <>
-                  <DialogHeader>
+                  <DialogHeader className="sticky top-0 z-20 -mx-4 sm:-mx-6 -mt-4 sm:-mt-6 px-4 sm:px-6 pt-4 sm:pt-5 pb-4 bg-card">
                     <DialogTitle className="text-lg font-bold pr-8">{title}</DialogTitle>
                   </DialogHeader>
-                  {details}
+                  {detailsBody}
+                  <div className="sticky bottom-0 z-20 -mx-4 sm:-mx-6 -mb-4 sm:-mb-6 px-4 sm:px-6 py-3 bg-card border-t border-border/40">
+                    {detailsFooter}
+                  </div>
                 </>
               );
             }
@@ -3016,13 +3072,17 @@ export default function PublicNoticeboard() {
                     />
                   )}
                 </div>
-                {/* Details sidebar — fixed width so text isn't cut off */}
-                <div className={`${detailExpanded ? "md:w-[25%] md:min-w-[200px]" : "md:w-[35%] md:min-w-[280px] md:max-w-[420px]"} shrink-0 max-md:max-h-[40vh] max-md:overflow-y-auto border-t md:border-t-0 md:border-l border-border/40 min-h-0 bg-card flex flex-col`}>
-                  <div className="overflow-y-auto p-4 sm:p-5 flex-1 min-h-0">
-                    <DialogHeader>
-                      <DialogTitle className="text-lg font-bold pr-2">{title}</DialogTitle>
-                    </DialogHeader>
-                    <div className="mt-3">{details}</div>
+                {/* Details sidebar — fixed title, scrollable list box, fixed footer */}
+                <div className={`${detailExpanded ? "md:w-[25%] md:min-w-[200px]" : "md:w-[35%] md:min-w-[280px] md:max-w-[420px]"} shrink-0 max-md:max-h-[45vh] border-t md:border-t-0 md:border-l border-border/40 min-h-0 bg-card flex flex-col p-4 sm:p-5 gap-3`}>
+                  <DialogHeader className="shrink-0">
+                    <DialogTitle className="text-lg font-bold pr-2">{title}</DialogTitle>
+                  </DialogHeader>
+                  {/* The list lives in its own box — only this part scrolls */}
+                  <div className="flex-1 min-h-0 overflow-y-auto rounded-xl border border-border/40 bg-muted/10 p-3">
+                    {detailsBody}
+                  </div>
+                  <div className="shrink-0 pt-3 border-t border-border/40">
+                    {detailsFooter}
                   </div>
                 </div>
               </div>
@@ -3170,10 +3230,12 @@ export default function PublicNoticeboard() {
                 { id: "files", label: "Files", icon: <FolderClosed className="h-3.5 w-3.5" /> },
                 { id: "backup", label: "Backup", icon: <Database className="h-3.5 w-3.5" /> },
                 { id: "users", label: "Users", icon: <Users className="h-3.5 w-3.5" /> },
+                { id: "reports", label: "Reports", icon: <ShieldCheck className="h-3.5 w-3.5" /> },
+                { id: "logs", label: "Activity", icon: <History className="h-3.5 w-3.5" /> },
               ].map((tab) => (
                 <button
                   key={tab.id}
-                  onClick={() => setSettingsTab(tab.id as "meetings" | "display" | "conventions" | "map" | "events" | "files" | "backup" | "users")}
+                  onClick={() => setSettingsTab(tab.id as "meetings" | "display" | "conventions" | "map" | "events" | "files" | "backup" | "users" | "reports" | "logs")}
                   className={`flex items-center gap-1.5 px-3.5 py-2.5 rounded-full text-sm font-medium whitespace-nowrap shrink-0 transition-colors ${
                     settingsTab === tab.id ? "bg-indigo-500 text-white" : "bg-muted/50 text-muted-foreground"
                   }`}
@@ -3197,10 +3259,12 @@ export default function PublicNoticeboard() {
                   { id: "files", label: "File Manager", icon: <FolderClosed className="h-4 w-4" /> },
                   { id: "backup", label: "Backup & History", icon: <Database className="h-4 w-4" /> },
                   { id: "users", label: "Users", icon: <Users className="h-4 w-4" /> },
+                  { id: "reports", label: "Reports", icon: <ShieldCheck className="h-4 w-4" /> },
+                  { id: "logs", label: "Activity Log", icon: <History className="h-4 w-4" /> },
                 ].map((tab) => (
                   <button
                     key={tab.id}
-                    onClick={() => setSettingsTab(tab.id as "meetings" | "display" | "conventions" | "map" | "events" | "files" | "backup" | "users")}
+                    onClick={() => setSettingsTab(tab.id as "meetings" | "display" | "conventions" | "map" | "events" | "files" | "backup" | "users" | "reports" | "logs")}
                     className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors text-left ${
                       settingsTab === tab.id ? "bg-indigo-500 text-white" : "text-muted-foreground hover:bg-accent hover:text-foreground"
                     }`}
@@ -3221,6 +3285,8 @@ export default function PublicNoticeboard() {
                 {settingsTab === "files" && <FileManager />}
                 {settingsTab === "backup" && <BackupHistory />}
                 {settingsTab === "users" && <UsersPanel language={language} />}
+                {settingsTab === "reports" && <ReportsPanel />}
+                {settingsTab === "logs" && <LogsPanel />}
               </div>
             </div>
 
@@ -3747,9 +3813,123 @@ function MeetingCard({ meeting, language, formatDate, onOpenPdf, onOpenPhoto }: 
 
 // ─── Pinned Schedule Strip (current week meeting + public talk) ──
 
-function PinnedScheduleStrip({ midweekSchedules, publicTalkSchedules, language, isAdmin, onOpenPdf, onOpenPhoto, onCardClick, onEdit, onDelete, midweekDay = 2, weekendDay = 0 }: {
+// Open a clean print window for a schedule notice — used for printing the
+// schedule list to post on the noticeboard
+function printScheduleNotice(title: string, content: string) {
+  const variant: "midweek" | "public-talk" = /public\s+talk/i.test(title) ? "public-talk" : "midweek";
+  const fields = parseScheduleFieldsShared(content);
+  const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const rows = fields.map(f => {
+    const cfg = getFieldConfig(f.key, variant);
+    return `<tr><td class="lbl">${esc(cfg.label || f.key)}</td><td class="${f.key === "TalkTheme" ? "bold" : ""}">${esc(f.value)}</td></tr>`;
+  }).join("");
+  const html = `<!doctype html><html><head><title>${esc(title)}</title><style>
+    body { font-family: Georgia, 'Times New Roman', serif; margin: 40px; color: #111; }
+    h1 { font-size: 20px; margin: 0 0 4px; }
+    .sub { color: #555; font-size: 13px; margin-bottom: 20px; }
+    table { width: 100%; border-collapse: collapse; }
+    td { padding: 8px 10px; border-bottom: 1px solid #ddd; font-size: 14px; vertical-align: top; }
+    td.lbl { width: 200px; text-transform: uppercase; font-size: 10px; letter-spacing: 0.06em; font-weight: 700; color: #444; padding-top: 11px; }
+    td.bold { font-weight: 700; }
+    @media print { body { margin: 10mm; } }
+  </style></head><body>
+    <h1>${esc(title)}</h1>
+    <div class="sub">${new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })}</div>
+    <table>${rows}</table>
+  </body></html>`;
+  const w = window.open("", "_blank", "width=720,height=860");
+  if (!w) return;
+  w.document.write(html);
+  w.document.close();
+  w.focus();
+  setTimeout(() => w.print(), 250);
+}
+
+// "This week at a glance" — compact strip with this week's roles and upcoming
+// special events. Meeting times live in the schedule strip above.
+function ThisWeekGlance({ roles, events, onOpenPhoto }: {
+  roles: RoleAssignment[];
+  events: SpecialEvent[];
+  onOpenPhoto: (url: string, title: string) => void;
+}) {
+  const now = new Date();
+  const todayStr = now.toISOString().split("T")[0];
+  // Monday of the current week
+  const monday = new Date(now);
+  monday.setDate(now.getDate() - ((now.getDay() + 6) % 7));
+  const mondayStr = monday.toISOString().split("T")[0];
+  const sunday = new Date(monday);
+  sunday.setDate(monday.getDate() + 6);
+  const sundayStr = sunday.toISOString().split("T")[0];
+
+  const weekRoles = roles.filter(r => r.isPublished && r.weekDate && r.weekDate >= mondayStr && r.weekDate <= sundayStr);
+  const nextEvents = [...events]
+    .filter(e => (e.endDate || e.startDate) >= todayStr)
+    .sort((a, b) => a.startDate.localeCompare(b.startDate))
+    .slice(0, 3);
+
+  if (weekRoles.length === 0 && nextEvents.length === 0) return null;
+
+  const fmtDate = (d: string) => new Date(d + "T00:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+
+  const card = "rounded-2xl border border-border/40 bg-card p-4 space-y-2.5 min-w-0";
+  const cardTitle = "flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-muted-foreground";
+
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+      {/* This week's roles */}
+      {weekRoles.length > 0 && (
+        <div className={card}>
+          <div className={cardTitle}><UserCog className="h-4 w-4 text-blue-600" /> This Week's Roles</div>
+          {weekRoles.map(r => (
+            <div key={r.id} className="rounded-xl bg-muted/30 border border-border/30 px-3 py-2">
+              <div className="flex items-center gap-2">
+                <span className={`px-1.5 py-0.5 rounded-md text-[10px] font-bold ${r.meetingType === "midweek" ? "bg-blue-100 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300" : "bg-purple-100 text-purple-700 dark:bg-purple-950/40 dark:text-purple-300"}`}>
+                  {r.meetingType === "midweek" ? "MW" : "WE"}
+                </span>
+                {r.fileUrl ? (
+                  <button onClick={() => onOpenPhoto(r.fileUrl!, r.title)} className="text-xs font-medium text-indigo-600 dark:text-indigo-400 hover:underline truncate">
+                    View role sheet
+                  </button>
+                ) : (
+                  <span className="text-xs text-muted-foreground">No sheet</span>
+                )}
+              </div>
+              {r.ocrText && (
+                <p className="text-xs leading-relaxed mt-1.5 whitespace-pre-wrap line-clamp-4">{r.ocrText}</p>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Coming up */}
+      {nextEvents.length > 0 && (
+        <div className={card}>
+          <div className={cardTitle}><Star className="h-4 w-4 text-amber-500" /> Coming Up</div>
+          {nextEvents.map(e => (
+            <div key={e.id} className="flex items-center gap-2.5 rounded-xl bg-muted/30 border border-border/30 px-3 py-2">
+              <div className="h-8 w-8 rounded-lg bg-amber-500 flex items-center justify-center shrink-0">
+                <Star className="h-4 w-4 text-white" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-sm font-semibold leading-tight truncate">{e.title}</p>
+                <p className="text-xs text-muted-foreground">
+                  {fmtDate(e.startDate)}{e.endDate && e.endDate !== e.startDate ? ` – ${fmtDate(e.endDate)}` : ""}
+                </p>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PinnedScheduleStrip({ midweekSchedules, publicTalkSchedules, meetings, language, isAdmin, onOpenPdf, onOpenPhoto, onCardClick, onEdit, onDelete, midweekDay = 2, weekendDay = 0 }: {
   midweekSchedules: Notice[];
   publicTalkSchedules: Notice[];
+  meetings: Meeting[];
   language: "en" | "tl";
   isAdmin: boolean;
   onOpenPdf: (url: string, title: string) => void;
@@ -3809,6 +3989,12 @@ function PinnedScheduleStrip({ midweekSchedules, publicTalkSchedules, language, 
   };
 
   const renderScheduleCard = (schedule: Notice | null, type: "midweek" | "public-talk") => {
+    // Next upcoming meeting of this type — supplies the time/location even
+    // when no schedule image has been uploaded yet
+    const nextMeeting = meetings
+      .filter(m => m.isPublished && m.meetingType === (type === "midweek" ? "midweek" : "weekend") && m.date >= today)
+      .sort((a, b) => a.date.localeCompare(b.date))[0];
+
     if (!schedule) {
       return (
         <div className={`w-full sm:w-[280px] rounded-2xl border-2 border-dashed border-border/30 p-4 shrink-0 ${type === "midweek" ? "bg-blue-50/30 dark:bg-blue-950/10" : "bg-purple-50/30 dark:bg-purple-950/10"}`}>
@@ -3818,7 +4004,14 @@ function PinnedScheduleStrip({ midweekSchedules, publicTalkSchedules, language, 
             </div>
             <span className="text-sm font-bold">{type === "midweek" ? "Midweek Meeting" : "Public Talk"}</span>
           </div>
-          <p className="text-xs text-muted-foreground">No schedule uploaded yet</p>
+          {nextMeeting ? (
+            <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+              <Clock className="h-3 w-3 shrink-0" />
+              {new Date(nextMeeting.date + "T00:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })} · {nextMeeting.time}
+            </p>
+          ) : (
+            <p className="text-xs text-muted-foreground">No schedule uploaded yet</p>
+          )}
         </div>
       );
     }
@@ -3847,6 +4040,7 @@ function PinnedScheduleStrip({ midweekSchedules, publicTalkSchedules, language, 
             </p>
             <p className="text-[11px] text-muted-foreground truncate">
               {fmtRange(schedule.eventStartDate || null, schedule.eventEndDate || null)}
+              {nextMeeting?.time && <span className="ml-1">· {nextMeeting.time}</span>}
               {isThisWeek && <span className="text-green-600 dark:text-green-400 font-bold ml-1">· This week</span>}
             </p>
           </div>
@@ -3894,24 +4088,6 @@ function PinnedScheduleStrip({ midweekSchedules, publicTalkSchedules, language, 
             </div>
           </div>
         )}
-
-        {/* Structured fields as colored blocks */}
-        {(() => {
-          const fields = parseScheduleFields(schedule.content ?? schedule.description ?? null);
-          if (fields.length === 0) return null;
-          return (
-            <div className="space-y-1">
-              {fields.slice(0, 6).map((f, i) => (
-                <div key={i} className={`flex items-center gap-2 rounded-lg ${f.bg} border border-border/30 px-2 py-1`}>
-                  <div className={`w-1 h-4 rounded-full shrink-0 ${f.dot}`} />
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-wide leading-none shrink-0">{f.name}</p>
-                  {f.assignee && <p className="text-xs font-medium leading-tight truncate">{f.assignee}</p>}
-                </div>
-              ))}
-              {fields.length > 6 && <p className="text-[10px] text-muted-foreground text-center">+{fields.length - 6} more</p>}
-            </div>
-          );
-        })()}
       </div>
     );
   };
@@ -3926,52 +4102,22 @@ function PinnedScheduleStrip({ midweekSchedules, publicTalkSchedules, language, 
 
 // ─── Schedule Carousel ───────────────────────────────────
 
-// Color mapping for schedule fields on the noticeboard
-const SCHEDULE_FIELD_COLORS: Record<string, { label: string; dot: string; bg: string }> = {
-  Speaker: { label: "Speaker", dot: "bg-blue-500", bg: "bg-blue-50 dark:bg-blue-950/30" },
-  Congregation: { label: "Congregation", dot: "bg-cyan-500", bg: "bg-cyan-50 dark:bg-cyan-950/30" },
-  TalkTheme: { label: "Talk Theme", dot: "bg-indigo-500", bg: "bg-indigo-50 dark:bg-indigo-950/30" },
-  Chairman: { label: "Chairman", dot: "bg-purple-500", bg: "bg-purple-50 dark:bg-purple-950/30" },
-  Prayer: { label: "Prayer", dot: "bg-green-500", bg: "bg-green-50 dark:bg-green-950/30" },
-  WTStudyReader: { label: "WT Study Reader", dot: "bg-amber-500", bg: "bg-amber-50 dark:bg-amber-950/30" },
-  BibleReading: { label: "Bible Reading", dot: "bg-blue-500", bg: "bg-blue-50 dark:bg-blue-950/30" },
-  TreasuresTalk: { label: "Treasures Talk", dot: "bg-indigo-500", bg: "bg-indigo-50 dark:bg-indigo-950/30" },
-  TreasuresGem: { label: "Treasures Gem", dot: "bg-indigo-500", bg: "bg-indigo-50 dark:bg-indigo-950/30" },
-  ApplyYourself1: { label: "Apply Yourself #1", dot: "bg-teal-500", bg: "bg-teal-50 dark:bg-teal-950/30" },
-  ApplyYourself2: { label: "Apply Yourself #2", dot: "bg-teal-500", bg: "bg-teal-50 dark:bg-teal-950/30" },
-  LivingTalk: { label: "Living Talk", dot: "bg-rose-500", bg: "bg-rose-50 dark:bg-rose-950/30" },
-  CongregationBibleStudy: { label: "Congregation Bible Study", dot: "bg-amber-500", bg: "bg-amber-50 dark:bg-amber-950/30" },
-  Reader: { label: "Reader", dot: "bg-green-500", bg: "bg-green-50 dark:bg-green-950/30" },
-};
-
-// Parse schedule content "Key: Value\nKey: Value" into structured fields
-function parseScheduleFields(content: string | null): { name: string; assignee: string; dot: string; bg: string }[] {
-  if (!content) return [];
-  const lines = content.split("\n");
-  const result: { name: string; assignee: string; dot: string; bg: string }[] = [];
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-    // Skip the header line (e.g. "Midweek meeting schedule for ...")
-    if (/^(Midweek meeting|Public talk)\s+schedule for/i.test(trimmed)) continue;
-    const idx = trimmed.indexOf(":");
-    let name: string, assignee: string;
-    if (idx > 0) {
-      name = trimmed.slice(0, idx).trim();
-      assignee = trimmed.slice(idx + 1).trim();
-    } else {
-      name = trimmed;
-      assignee = "";
-    }
-    const colors = SCHEDULE_FIELD_COLORS[name];
-    result.push({
-      name: colors?.label || name,
-      assignee,
-      dot: colors?.dot || "bg-slate-400",
-      bg: colors?.bg || "bg-slate-50 dark:bg-slate-950/30",
-    });
-  }
-  return result;
+// Parse schedule content into structured fields with variant-aware colors + icons
+function parseScheduleFields(content: string | null, variant: ScheduleVariant = "midweek"): { key: string; name: string; value: string; bg: string; border: string; text: string; iconBg: string; Icon: React.ComponentType<{ className?: string }> }[] {
+  const raw = parseScheduleFieldsShared(content);
+  return raw.map(f => {
+    const cfg = getFieldConfig(f.key, variant);
+    return {
+      key: f.key,
+      name: cfg.label || f.key,
+      value: f.value,
+      bg: cfg.bg,
+      border: cfg.border,
+      text: cfg.text,
+      iconBg: cfg.iconBg,
+      Icon: cfg.icon,
+    };
+  });
 }
 
 function ScheduleCarousel({ schedules, language, isAdmin, onOpenPdf, onOpenPhoto, onCardClick, onEdit, onDelete }: {
@@ -3999,11 +4145,11 @@ function ScheduleCarousel({ schedules, language, isAdmin, onOpenPdf, onOpenPhoto
     });
   }, [schedules]);
 
-  // Only show upcoming + 1 past
+  // Show upcoming schedules; fall back to most recent past only if no upcoming
   const visibleSchedules = useMemo(() => {
     const past = sorted.filter(s => (s.eventEndDate || s.eventStartDate || "") < today);
     const upcoming = sorted.filter(s => (s.eventEndDate || s.eventStartDate || "") >= today);
-    return [...past.slice(-1), ...upcoming];
+    return upcoming.length > 0 ? upcoming : past.slice(-1);
   }, [sorted, today]);
 
   const isPast = (s: Notice) => (s.eventEndDate || s.eventStartDate || "") < today;
@@ -4190,35 +4336,6 @@ function ScheduleCarousel({ schedules, language, isAdmin, onOpenPdf, onOpenPhoto
                         </div>
                       </>
                     )}
-
-                    {/* Schedule fields as colored blocks (like roles) */}
-                    {(() => {
-                      const fields = parseScheduleFields(schedule.content ?? schedule.description ?? null);
-                      if (fields.length > 0) {
-                        return (
-                          <div className="space-y-1">
-                            {fields.map((f, i) => (
-                              <div key={i} className={`flex items-center gap-2 rounded-lg ${f.bg} border border-border/30 px-2 py-1.5`}>
-                                <div className={`w-1 h-6 rounded-full shrink-0 ${f.dot}`} />
-                                <div className="flex-1 min-w-0">
-                                  <p className="text-[10px] text-muted-foreground uppercase tracking-wide leading-none">{f.name}</p>
-                                  {f.assignee && <p className="text-xs font-medium leading-tight mt-0.5 truncate">{f.assignee}</p>}
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        );
-                      }
-                      // Fallback: plain description if no structured fields
-                      if (schedule.description) {
-                        return (
-                          <div className="rounded-lg border border-border/30 bg-background/50 p-2 max-h-24 overflow-y-auto">
-                            <p className="text-[11px] whitespace-pre-wrap leading-relaxed">{schedule.description}</p>
-                          </div>
-                        );
-                      }
-                      return null;
-                    })()}
                   </CardContent>
                 </Card>
               </div>

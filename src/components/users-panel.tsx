@@ -45,6 +45,8 @@ import {
   CalendarRange,
   KeyRound,
   Copy,
+  Lock,
+  Unlock,
 } from "lucide-react";
 import { t } from "@/lib/i18n";
 import type { Language } from "@/lib/i18n";
@@ -61,6 +63,8 @@ interface UserRecord {
   mustChangePassword?: boolean;
   tempPassword?: string | null;
   createdAt: string;
+  failedLoginAttempts?: number;
+  lockedUntil?: string | null;
 }
 
 type ModuleId = "notices" | "meetings" | "events";
@@ -206,9 +210,27 @@ export function UsersPanel({ language }: { language: Language }) {
     }
   };
 
-  const handleDelete = async () => {
-    if (!deleteId) return;
+  const handleUnlock = async (user: UserRecord) => {
     try {
+      const res = await fetch(`/api/admin/users/${user.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ unlock: true }),
+      });
+      if (res.ok) {
+        toast({ title: `Unlocked ${user.username}` });
+        fetchUsers();
+      } else {
+        const err = await res.json();
+        toast({ title: "Error", description: err.error, variant: "destructive" });
+      }
+    } catch {
+      toast({ title: "Error unlocking user", variant: "destructive" });
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!deleteId) return;    try {
       const res = await fetch(`/api/admin/users/${deleteId}`, { method: "DELETE" });
       if (res.ok) {
         toast({ title: "User deleted" });
@@ -299,12 +321,29 @@ export function UsersPanel({ language }: { language: Language }) {
                           {m.labelEn}: {perms[m.id] === "rw" ? "upload" : "view"}
                         </Badge>
                       ))}
+                      {user.lockedUntil && new Date(user.lockedUntil) > new Date() && (
+                        <Badge variant="outline" className="text-xs rounded-md bg-red-50 dark:bg-red-950/30 border-red-300 dark:border-red-700 text-red-700 dark:text-red-300 gap-1">
+                          <Lock className="h-3 w-3" />
+                          Locked
+                        </Badge>
+                      )}
                     </div>
                     <p className="text-sm text-muted-foreground">
                       @{user.username}{user.email && !user.email.endsWith("@local") && ` — ${user.email}`}
                     </p>
                   </div>
                   <div className="flex gap-1 shrink-0">
+                    {user.lockedUntil && new Date(user.lockedUntil) > new Date() && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="rounded-lg text-orange-600"
+                        onClick={() => handleUnlock(user)}
+                        title="Unlock account"
+                      >
+                        <Unlock className="h-4 w-4" />
+                      </Button>
+                    )}
                     {user.role !== "super_admin" && (
                       <Button
                         variant="ghost"

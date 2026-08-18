@@ -60,7 +60,9 @@ function encodeBytes(table: string, rows: Record<string, unknown>[]): Record<str
   });
 }
 
-// Decode base64 back to Buffer for Prisma restore
+// Decode base64 back to Buffer for Prisma restore. Handles both encodings:
+// {__base64: "..."} (what encodeBytes produces) and {type: "Buffer", data: [...]}
+// (what JSON round-tripping of serializeRow produces for UploadedFile BLOBs).
 function decodeBytes(table: string, rows: Record<string, unknown>[]): Record<string, unknown>[] {
   const fields = BYTES_FIELDS[table];
   if (!fields) return rows;
@@ -70,6 +72,8 @@ function decodeBytes(table: string, rows: Record<string, unknown>[]): Record<str
       const val = out[f];
       if (val && typeof val === "object" && "__base64" in val) {
         out[f] = Buffer.from((val as { __base64: string }).__base64, "base64");
+      } else if (val && typeof val === "object" && "type" in val && (val as { type: string }).type === "Buffer" && Array.isArray((val as unknown as { data: number[] }).data)) {
+        out[f] = Buffer.from((val as unknown as { data: number[] }).data);
       }
     }
     return out;
@@ -163,12 +167,12 @@ export async function POST(request: NextRequest) {
         if (!rows || !Array.isArray(rows)) continue;
         try {
           // @ts-expect-error dynamic table access
-          await db[table.toLowerCase()].deleteMany({});
+          await db[table].deleteMany({});
           const decoded = decodeBytes(table, rows);
           for (const row of decoded) {
             try {
               // @ts-expect-error dynamic table access
-              await db[table.toLowerCase()].create({ data: row });
+              await db[table].create({ data: row });
             } catch (e) {
               console.error(`Error restoring ${table} row:`, e);
             }
@@ -201,7 +205,7 @@ export async function POST(request: NextRequest) {
       for (const table of ALL_TABLES) {
         try {
           // @ts-expect-error dynamic table access
-          const rows = await db[table.toLowerCase()].findMany();
+          const rows = await db[table].findMany();
           const serialized = (rows as Record<string, unknown>[]).map(r => serializeRow(r));
           backup[table] = encodeBytes(table, serialized);
         } catch {
@@ -253,12 +257,12 @@ export async function POST(request: NextRequest) {
 
         try {
           // @ts-expect-error dynamic table access
-          await db[table.toLowerCase()].deleteMany({});
+          await db[table].deleteMany({});
           const decoded = decodeBytes(table, rows);
           for (const row of decoded) {
             try {
               // @ts-expect-error dynamic table access
-              await db[table.toLowerCase()].create({ data: row });
+              await db[table].create({ data: row });
             } catch (e) {
               console.error(`Error restoring ${table} row:`, e);
             }
@@ -283,7 +287,7 @@ export async function POST(request: NextRequest) {
       for (const table of ALL_TABLES) {
         try {
           // @ts-expect-error dynamic table access
-          const rows = await db[table.toLowerCase()].findMany();
+          const rows = await db[table].findMany();
           const serialized = (rows as Record<string, unknown>[]).map(r => serializeRow(r));
           backup[table] = encodeBytes(table, serialized);
         } catch {
@@ -341,12 +345,12 @@ export async function POST(request: NextRequest) {
 
         try {
           // @ts-expect-error dynamic table access
-          await db[table.toLowerCase()].deleteMany({});
+          await db[table].deleteMany({});
           const decoded = decodeBytes(table, rows);
           for (const row of decoded) {
             try {
               // @ts-expect-error dynamic table access
-              await db[table.toLowerCase()].create({ data: row });
+              await db[table].create({ data: row });
             } catch (e) {
               console.error(`Error restoring ${table} row:`, e);
             }

@@ -29,7 +29,7 @@ export function LetterModal({ open, onClose, onSaved, variant, categories }: Let
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [options, setOptions] = useState<AdvancedOptionsState>({
-    isPinned: false, expiresAt: "", showOnCalendar: false, eventStartDate: "", eventEndDate: "", location: "", latitude: null, longitude: null,
+    isPinned: false, expiresAt: "", showOnCalendar: false, eventStartDate: "", eventEndDate: "", location: "", latitude: null, longitude: null, isPublished: true,
   });
   const [saving, setSaving] = useState(false);
   const isImageFile = fileUrl && /\.(jpg|jpeg|png|gif|webp|bmp|svg)$/i.test(fileUrl);
@@ -46,7 +46,7 @@ export function LetterModal({ open, onClose, onSaved, variant, categories }: Let
 
   const resetForm = () => {
     setFileUrl(null); setFileName(null); setFileType(""); setTitle(""); setDescription("");
-    setOptions({ isPinned: false, expiresAt: "", showOnCalendar: false, eventStartDate: "", eventEndDate: "", location: "", latitude: null, longitude: null });
+    setOptions({ isPinned: false, expiresAt: "", showOnCalendar: false, eventStartDate: "", eventEndDate: "", location: "", latitude: null, longitude: null, isPublished: true });
   };
 
   const handleSaveDraft = async () => {

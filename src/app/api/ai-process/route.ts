@@ -68,34 +68,46 @@ export async function POST(request: NextRequest) {
 
     const imgBase64 = imgBuffer.toString("base64");
 
-    // Call Gemini API (gemini-2.0-flash — free tier)
-    const geminiRes = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{
-            parts: [
-              { text: prompt },
-              { inline_data: { mime_type: mimeType, data: imgBase64 } },
-            ],
-          }],
-          generationConfig: {
-            temperature: 0.1,
-            responseMimeType: "application/json",
-          },
-        }),
-      }
-    );
+    // Call Gemini API (gemini-3.5-flash — current model, replaces deprecated gemini-2.0-flash).
+    // Retries transient errors (429 rate limit, 500/503 overload) with backoff.
+    const geminiBody = JSON.stringify({
+      contents: [{
+        parts: [
+          { text: prompt },
+          { inline_data: { mime_type: mimeType, data: imgBase64 } },
+        ],
+      }],
+      generationConfig: {
+        temperature: 0.1,
+        responseMimeType: "application/json",
+      },
+    });
 
-    if (!geminiRes.ok) {
-      const errText = await geminiRes.text();
-      console.error("Gemini API error:", errText);
-      return NextResponse.json(
-        { error: `AI processing failed: ${geminiRes.status}` },
-        { status: geminiRes.status }
+    let geminiRes: Response | null = null;
+    let lastErrText = "";
+    for (let attempt = 0; attempt < 3; attempt++) {
+      geminiRes = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${apiKey}`,
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: geminiBody }
       );
+      if (geminiRes.ok) break;
+      lastErrText = await geminiRes.text();
+      // Only retry transient failures — auth/config errors fail fast
+      if (![429, 500, 503].includes(geminiRes.status)) break;
+      if (attempt < 2) await new Promise(r => setTimeout(r, 1500 * (attempt + 1)));
+    }
+
+    if (geminiRes && !geminiRes.ok) {
+      console.error("Gemini API error:", lastErrText);
+      let geminiMsg = `AI processing failed (${geminiRes.status})`;
+      try {
+        const parsed = JSON.parse(lastErrText);
+        if (parsed?.error?.message) geminiMsg = parsed.error.message;
+      } catch {}
+      return NextResponse.json({ error: geminiMsg }, { status: geminiRes.status });
+    }
+    if (!geminiRes) {
+      return NextResponse.json({ error: "AI processing failed — no response" }, { status: 502 });
     }
 
     const geminiData = await geminiRes.json();

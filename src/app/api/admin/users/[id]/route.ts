@@ -28,6 +28,23 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
       return NextResponse.json(user);
     }
 
+    // Unlock a locked-out user (super admin only)
+    if (body.unlock) {
+      const target = await db.user.findUnique({ where: { id }, select: { role: true } });
+      if (!target) {
+        return NextResponse.json({ error: "User not found" }, { status: 404 });
+      }
+      // Only super_admin can unlock
+      if (auth.role !== "super_admin") {
+        return NextResponse.json({ error: "Only super admins can unlock users" }, { status: 403 });
+      }
+      await db.user.update({
+        where: { id },
+        data: { failedLoginAttempts: 0, lockedUntil: null },
+      });
+      return NextResponse.json({ success: true });
+    }
+
     const updateData: Record<string, unknown> = {};
 
     // Prevent changing username or role of existing super_admin users
@@ -47,11 +64,11 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     }
 
     if (body.name !== undefined) updateData.name = body.name;
-    if (body.username !== undefined) updateData.username = body.username;
+    if (body.username !== undefined) updateData.username = typeof body.username === "string" ? body.username.trim() : body.username;
     if (body.email !== undefined) {
       // Use unique placeholder if email is empty
-      const username = existingUser?.username || body.username || "";
-      updateData.email = body.email && body.email.trim() ? body.email.trim() : `${username}@local`;
+      const username = (existingUser?.username || body.username || "").trim().toLowerCase();
+      updateData.email = body.email && String(body.email).trim() ? String(body.email).trim().toLowerCase() : `${username}@local`;
     }
     if (body.role !== undefined) updateData.role = body.role;
     if (body.permissions !== undefined) {
@@ -84,7 +101,10 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     });
 
     return NextResponse.json(user);
-  } catch (error) {
+  } catch (error: unknown) {
+    if ((error as { code?: string })?.code === "P2002") {
+      return NextResponse.json({ error: "Username or email already exists" }, { status: 409 });
+    }
     console.error("Error updating user:", error);
     return NextResponse.json({ error: "Failed to update user" }, { status: 500 });
   }

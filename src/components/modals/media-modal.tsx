@@ -57,7 +57,7 @@ export function MediaModal({
   const [description, setDescription] = useState("");
   const [categoryId, setCategoryId] = useState<string>(defaultCategoryId || "");
   const [options, setOptions] = useState<AdvancedOptionsState>({
-    isPinned: false, expiresAt: "", showOnCalendar: false, eventStartDate: "", eventEndDate: "", location: "", latitude: null, longitude: null,
+    isPinned: false, expiresAt: "", showOnCalendar: false, eventStartDate: "", eventEndDate: "", location: "", latitude: null, longitude: null, isPublished: true,
   });
   const [saving, setSaving] = useState(false);
   const [bulkDates, setBulkDates] = useState<string[]>([]);
@@ -68,7 +68,7 @@ export function MediaModal({
   const resetForm = () => {
     setFiles([]); setTitle(""); setDescription("");
     setCategoryId(defaultCategoryId || "");
-    setOptions({ isPinned: false, expiresAt: "", showOnCalendar: false, eventStartDate: "", eventEndDate: "", location: "", latitude: null, longitude: null });
+    setOptions({ isPinned: false, expiresAt: "", showOnCalendar: false, eventStartDate: "", eventEndDate: "", location: "", latitude: null, longitude: null, isPublished: true });
     setBulkDates([]);
     setBulkExpanded(false);
     setDateRange(undefined);

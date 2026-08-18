@@ -199,6 +199,36 @@ export async function GET(request: NextRequest) {
       include: { category: { select: { name: true, color: true } } },
     });
 
+    // Build a map of date → schedule notice for linking meeting events to their schedules
+    const scheduleNoticeByDate = new Map<string, { id: string; title: string; fileUrl: string | null; content: string | null; description: string | null }>();
+    for (const n of calendarNotices) {
+      if (!n.eventStartDate) continue;
+      const isSchedule = n.title.toLowerCase().includes("midweek") || n.title.toLowerCase().includes("public talk") || n.title.toLowerCase().includes("schedule");
+      if (!isSchedule) continue;
+      const start = n.eventStartDate;
+      const end = n.eventEndDate || n.eventStartDate;
+      const current = new Date(start + "T00:00:00");
+      const endDate = new Date(end + "T00:00:00");
+      while (current <= endDate) {
+        const dateStr = dateToYMD(current);
+        // Only link if there isn't already a schedule for this date
+        if (!scheduleNoticeByDate.has(dateStr)) {
+          scheduleNoticeByDate.set(dateStr, { id: n.id, title: n.title, fileUrl: n.fileUrl, content: n.content, description: n.description });
+        }
+        current.setDate(current.getDate() + 1);
+      }
+    }
+
+    // Link meeting events to their schedule notices
+    for (const ev of events) {
+      if (ev.type === "meeting") {
+        const schedule = scheduleNoticeByDate.get(ev.date);
+        if (schedule) {
+          ev.meta = { ...ev.meta, scheduleNoticeId: schedule.id, scheduleTitle: schedule.title, scheduleFileUrl: schedule.fileUrl, scheduleContent: schedule.content, scheduleDescription: schedule.description };
+        }
+      }
+    }
+
     for (const n of calendarNotices) {
       if (!n.eventStartDate) continue;
       const start = n.eventStartDate;

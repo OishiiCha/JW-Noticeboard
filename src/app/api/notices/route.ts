@@ -20,6 +20,22 @@ export async function GET(request: NextRequest) {
       });
     }
 
+    // Auto-archive meeting schedules whose date range has fully passed,
+    // so past weeks don't pile up on the board
+    const todayStr = new Date().toISOString().slice(0, 10);
+    await db.notice.updateMany({
+      where: {
+        deletedAt: null,
+        isArchived: false,
+        eventEndDate: { lt: todayStr },
+        OR: [
+          { title: { startsWith: "Midweek Meeting Schedule" } },
+          { title: { startsWith: "Public Talk Schedule" } },
+        ],
+      },
+      data: { isArchived: true, archivedAt: new Date() },
+    });
+
     const { searchParams } = new URL(request.url);
     const categoryId = searchParams.get("categoryId");
     const type = searchParams.get("type");
@@ -144,6 +160,38 @@ export async function POST(request: NextRequest) {
 
     if (!title) {
       return NextResponse.json({ error: "Title is required" }, { status: 400 });
+    }
+
+    // Server-side duplicate guard for meeting schedules: reject a schedule
+    // notice whose date range overlaps an existing schedule of the same kind.
+    // (The client offers Override/Skip; overriding deletes the old notice first,
+    // so this only fires when the conflict was never resolved.)
+    if (
+      typeof eventStartDate === "string" &&
+      (title.startsWith("Midweek Meeting Schedule") || title.startsWith("Public Talk Schedule"))
+    ) {
+      const newStart = eventStartDate.slice(0, 10);
+      const newEnd = (typeof eventEndDate === "string" ? eventEndDate : eventStartDate).slice(0, 10);
+      const candidates = await db.notice.findMany({
+        where: {
+          deletedAt: null,
+          isArchived: false,
+          title: { startsWith: title.split(" — ")[0] },
+          eventStartDate: { lte: newEnd },
+        },
+        select: { id: true, title: true, eventStartDate: true, eventEndDate: true },
+      });
+      const overlap = candidates.find(c => {
+        const s = (c.eventStartDate || "").slice(0, 10);
+        const e = (c.eventEndDate || c.eventStartDate || "").slice(0, 10);
+        return s <= newEnd && e >= newStart;
+      });
+      if (overlap) {
+        return NextResponse.json(
+          { error: `A schedule already exists for those dates (${overlap.title}). Delete or override it first.`, existingId: overlap.id },
+          { status: 409 },
+        );
+      }
     }
 
     const isAdmin = isAdminOrAbove(auth);

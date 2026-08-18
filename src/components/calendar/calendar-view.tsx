@@ -606,6 +606,28 @@ export function CalendarView({ language = "en", isAdmin = false, onEditEvent, on
                       <span>View schedule file</span>
                     </a>
                   )}
+                  {/* Meeting event with linked schedule notice — show schedule fields */}
+                  {selectedEvent.type === "meeting" && Boolean(selectedEvent.meta?.scheduleNoticeId) && (() => {
+                    const content = String(selectedEvent.meta?.scheduleContent || selectedEvent.meta?.scheduleDescription || "");
+    const scheduleTitle = String(selectedEvent.meta?.scheduleTitle || "Schedule");
+    return (
+      <div className="space-y-2 rounded-xl border border-border/40 p-3 bg-muted/10">
+        <div className="flex items-center gap-2">
+          <FileText className="h-4 w-4 text-indigo-500" />
+          <span className="text-sm font-semibold">{scheduleTitle}</span>
+        </div>
+        {content && (
+          <p className="text-xs whitespace-pre-wrap text-muted-foreground leading-relaxed line-clamp-6">{content}</p>
+        )}
+        {Boolean(selectedEvent.meta?.scheduleFileUrl) && (
+          <a href={String(selectedEvent.meta!.scheduleFileUrl)} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-sm text-indigo-600 hover:underline">
+            <FileText className="h-4 w-4" />
+            <span>View schedule image</span>
+          </a>
+        )}
+      </div>
+    );
+  })()}
                   {Boolean(selectedEvent.meta.zoomId) && (() => {
                     const zid = String(selectedEvent.meta.zoomId);
                     const zpass = selectedEvent.meta.zoomPasscode ? String(selectedEvent.meta.zoomPasscode) : "";
@@ -673,6 +695,19 @@ export function CalendarView({ language = "en", isAdmin = false, onEditEvent, on
                       }}
                     >
                       <Edit className="h-4 w-4 mr-1.5" /> Edit Notice
+                    </Button>
+                  )}
+                  {selectedEvent.type === "meeting" && Boolean(selectedEvent.meta?.scheduleNoticeId) && onEditNotice && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="rounded-lg"
+                      onClick={() => {
+                        onEditNotice(String(selectedEvent.meta!.scheduleNoticeId));
+                        setSelectedEvent(null);
+                      }}
+                    >
+                      <Edit className="h-4 w-4 mr-1.5" /> Edit Schedule
                     </Button>
                   )}
                 </div>

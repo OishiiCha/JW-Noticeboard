@@ -27,14 +27,14 @@ export function AnnouncementModal({ open, onClose, onSaved, categories }: Announ
   const [fileUrl, setFileUrl] = useState<string | null>(null);
   const [fileName, setFileName] = useState<string | null>(null);
   const [options, setOptions] = useState<AdvancedOptionsState>({
-    isPinned: false, expiresAt: "", showOnCalendar: false, eventStartDate: "", eventEndDate: "", location: "", latitude: null, longitude: null,
+    isPinned: false, expiresAt: "", showOnCalendar: false, eventStartDate: "", eventEndDate: "", location: "", latitude: null, longitude: null, isPublished: true,
   });
   const [saving, setSaving] = useState(false);
   const isImageFile = fileUrl && /\.(jpg|jpeg|png|gif|webp|bmp|svg)$/i.test(fileUrl);
 
   const resetForm = () => {
     setTitle(""); setContent(""); setFileUrl(null); setFileName(null);
-    setOptions({ isPinned: false, expiresAt: "", showOnCalendar: false, eventStartDate: "", eventEndDate: "", location: "", latitude: null, longitude: null });
+    setOptions({ isPinned: false, expiresAt: "", showOnCalendar: false, eventStartDate: "", eventEndDate: "", location: "", latitude: null, longitude: null, isPublished: true });
   };
 
   const handleSaveDraft = async () => {

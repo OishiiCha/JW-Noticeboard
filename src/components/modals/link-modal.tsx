@@ -45,14 +45,14 @@ export function LinkModal({ open, onClose, onSaved, categories, defaultCategoryI
   const [preview, setPreview] = useState<LinkPreview | null>(null);
   const [fetchingPreview, setFetchingPreview] = useState(false);
   const [options, setOptions] = useState<AdvancedOptionsState>({
-    isPinned: false, expiresAt: "", showOnCalendar: false, eventStartDate: "", eventEndDate: "", location: "", latitude: null, longitude: null,
+    isPinned: false, expiresAt: "", showOnCalendar: false, eventStartDate: "", eventEndDate: "", location: "", latitude: null, longitude: null, isPublished: true,
   });
   const [saving, setSaving] = useState(false);
 
   const resetForm = () => {
     setUrl(""); setTitle(""); setDescription(""); setButtonLabel(""); setPreview(null);
     setCategoryId(defaultCategoryId || "");
-    setOptions({ isPinned: false, expiresAt: "", showOnCalendar: false, eventStartDate: "", eventEndDate: "", location: "", latitude: null, longitude: null });
+    setOptions({ isPinned: false, expiresAt: "", showOnCalendar: false, eventStartDate: "", eventEndDate: "", location: "", latitude: null, longitude: null, isPublished: true });
   };
 
   const fetchPreview = useCallback(async (targetUrl: string) => {

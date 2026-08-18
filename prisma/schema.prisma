@@ -60,6 +60,8 @@ model User {
   tempPassword  String?   // plaintext temporary password, visible to super admin until the user changes it
   interfaceLanguage String @default("en") // "en" | "tl"
   tokenVersion   Int      @default(0)
+  failedLoginAttempts Int  @default(0)
+  lockedUntil    DateTime?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
