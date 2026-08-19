@@ -4,12 +4,14 @@
 #
 # Runs on port 2424 with persistent SQLite database and uploads.
 #
-# Build the image first with: ./build.sh
-# Then start with: docker compose up -d
+# Build and start with: docker compose up -d --build
 # ─────────────────────────────────────────────────────────────
 
 services:
   noticeboard-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
     image: noticeboard-app:latest
     container_name: noticeboard-app
     ports:

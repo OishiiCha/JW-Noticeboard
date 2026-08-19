@@ -93,14 +93,16 @@ A standalone digital noticeboard application for congregations — built with Ne
 # 1. Create a .env file from the template
 cp .env.example .env  # then edit values
 
-# 2. Build the image with buildx (fast, cached)
-./build.sh
+# 2. Build and start the container
+docker compose up -d --build
 
-# 3. Start the container (uses the pre-built image)
-docker compose up -d
-
-# 4. Open the app
+# 3. Open the app
 #    http://localhost:2424
+```
+
+To rebuild after code changes:
+```bash
+docker compose down && docker compose up -d --build
 ```
 
 The container persists data in two named volumes:
@@ -278,11 +280,8 @@ The `docker-compose.yml` is configured for production:
 - Auto-restarts unless stopped
 
 ```bash
-# Build the image (uses buildx with GHA cache)
-./build.sh
-
-# Start the container (uses the pre-built image, no rebuild)
-docker compose up -d
+# Build and start the container
+docker compose up -d --build
 
 # View logs
 docker compose logs -f
@@ -292,75 +291,18 @@ docker compose down
 
 # Update to a new version
 git pull
-./build.sh
-docker compose up -d
+docker compose down && docker compose up -d --build
 ```
 
-### Fast builds with buildx (recommended)
+### `build.sh` (alternative)
 
-Use `docker buildx build` with GitHub Actions cache for significantly faster rebuilds.
-The included `build.sh` script handles this automatically:
+You can also run `build.sh` to force a clean rebuild:
 
 ```bash
-# Build for native platform (loads into docker so compose can use it)
+# Rebuild without cache
 ./build.sh
 
-# Then run with compose (uses the cached image, no rebuild needed)
-docker compose up -d
-```
-
-#### `build.sh` options
-
-The script supports environment variables for customization:
-
-| Variable     | Default              | Description                                      |
-| ------------ | -------------------- | ------------------------------------------------ |
-| `IMAGE_NAME` | `noticeboard-app`    | Docker image name                                |
-| `IMAGE_TAG`  | `latest`             | Docker image tag                                 |
-| `PLATFORM`   | *(native)*           | Target platform, e.g. `linux/arm64` or `linux/amd64,linux/arm64` |
-| `PUSH`       | `false`              | Set to `true` to push to a registry              |
-| `LOAD`       | `true`               | Set to `false` to skip loading into docker (auto-disabled for multi-platform) |
-
-Examples:
-
-```bash
-# Build for Raspberry Pi (ARM64)
-PLATFORM=linux/arm64 ./build.sh
-
-# Build with a custom tag
-IMAGE_TAG=v1.2.3 ./build.sh
-
-# Multi-platform build and push to a registry
-PLATFORM=linux/amd64,linux/arm64 PUSH=true IMAGE_NAME=myregistry/noticeboard-app ./build.sh
-```
-
-You can also run buildx directly:
-
-```bash
-# Single-platform build with GHA cache
-docker buildx build --cache-to type=gha --cache-from type=gha -t noticeboard-app:latest .
-
-# Cross-compile for Raspberry Pi (ARM64)
-docker buildx build --platform linux/arm64 --cache-to type=gha --cache-from type=gha -t noticeboard-app:latest .
-
-# Multi-platform build + push to registry
-docker buildx build --platform linux/amd64,linux/arm64 --push -t myregistry/noticeboard-app:latest .
-```
-
-### Raspberry Pi
-
-The Dockerfile is multi-arch (AMD64 + ARM64) and optimized for Raspberry Pi 5. Build on the Pi directly:
-
-```bash
-./build.sh
-docker compose up -d
-```
-
-Or use buildx for cross-compilation from another machine:
-
-```bash
-PLATFORM=linux/arm64 ./build.sh
-# Then load the image on the Pi and run:
+# Then start
 docker compose up -d
 ```
 
