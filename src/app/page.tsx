@@ -4052,7 +4052,14 @@ function PinnedScheduleStrip({ midweekSchedules, publicTalkSchedules, meetings, 
 
         {/* Field preview when there's no image on the schedule */}
         {!schedule.fileUrl && (() => {
-          const previewFields = parseScheduleFieldsShared(schedule.content || "").slice(0, 3);
+          const allFields = parseScheduleFieldsShared(schedule.content || "");
+          // Public talk: surface the basics (speaker, theme, congregation)
+          // regardless of stored order; midweek: first fields as stored
+          const previewFields = type === "public-talk"
+            ? ["Speaker", "TalkTheme", "Congregation"]
+                .map(k => allFields.find(f => f.key === k && f.value.trim()))
+                .filter((f): f is { key: string; value: string; num?: number } => !!f)
+            : allFields.filter(f => f.value.trim()).slice(0, 3);
           if (previewFields.length === 0) return null;
           return (
             <div className="space-y-1">
@@ -4063,7 +4070,7 @@ function PinnedScheduleStrip({ midweekSchedules, publicTalkSchedules, meetings, 
                   <div key={i} className={`flex items-center gap-1.5 rounded-lg border ${cfg.border} ${cfg.bg} px-2 py-1 min-w-0`}>
                     <Icon className={`h-3 w-3 ${cfg.text} shrink-0`} />
                     <span className={`text-[10px] font-bold uppercase shrink-0 ${cfg.text}`}>{cfg.label || f.key}</span>
-                    <span className="text-[11px] font-medium truncate">{f.value}</span>
+                    <span className={`text-[11px] truncate ${f.key === "TalkTheme" ? "font-bold" : "font-medium"}`}>{f.value}</span>
                   </div>
                 );
               })}
