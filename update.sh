@@ -16,8 +16,8 @@ BACKUP_DIR=".backups"
 
 echo "==> 1/4 Pulling latest code..."
 if ! git diff --quiet || ! git diff --cached --quiet; then
-  echo "ERROR: You have uncommitted local changes. Commit or stash them first." >&2
-  exit 1
+  echo "    Local changes detected — stashing them (recoverable via 'git stash list')"
+  git stash push -m "update.sh auto-stash $(date +%Y-%m-%d_%H-%M-%S)"
 fi
 git pull --ff-only
 

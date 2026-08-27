@@ -15,3 +15,7 @@ uploads/
 # Ollama model directories (root-owned, not part of app)
 ollama-*-models/
 ollama-*-entrypoint.sh
+
+# Manual update backups (update.sh)
+.backups/
+
