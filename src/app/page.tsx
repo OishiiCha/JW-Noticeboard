@@ -2942,8 +2942,8 @@ export default function PublicNoticeboard() {
                 {/* Description — structured blocks for schedules, plain text otherwise */}
                 {description && <ScheduleContentDisplay text={description} plainClassName="text-sm text-foreground/80 leading-relaxed" />}
 
-                {/* Text content — schedules show their list even with an image attached */}
-                {n.content && (!hasMedia || !n.fileUrl || isScheduleContent(n.content)) && <ScheduleContentDisplay text={n.content} plainClassName="text-sm text-foreground/80 leading-relaxed" whitespacePreWrap />}
+                {/* Text content — schedules show their list even with an image attached (only when there's no description, which already carries the text) */}
+                {n.content && !description && (!hasMedia || !n.fileUrl || isScheduleContent(n.content)) && <ScheduleContentDisplay text={n.content} plainClassName="text-sm text-foreground/80 leading-relaxed" whitespacePreWrap />}
 
                 {/* Countdown */}
                 {n.eventStartDate && (() => {
@@ -3885,14 +3885,12 @@ function ThisWeekGlance({ roles, events, onOpenPhoto }: {
             <div key={r.id} className="rounded-xl bg-muted/30 border border-border/30 px-3 py-2">
               <div className="flex items-center gap-2">
                 <span className={`px-1.5 py-0.5 rounded-md text-[10px] font-bold ${r.meetingType === "midweek" ? "bg-blue-100 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300" : "bg-purple-100 text-purple-700 dark:bg-purple-950/40 dark:text-purple-300"}`}>
-                  {r.meetingType === "midweek" ? "MW" : "WE"}
+                  {r.meetingType === "midweek" ? "Midweek" : "Weekend"}
                 </span>
-                {r.fileUrl ? (
+                {r.fileUrl && (
                   <button onClick={() => onOpenPhoto(r.fileUrl!, r.title)} className="text-xs font-medium text-indigo-600 dark:text-indigo-400 hover:underline truncate">
                     View role sheet
                   </button>
-                ) : (
-                  <span className="text-xs text-muted-foreground">No sheet</span>
                 )}
               </div>
               {r.ocrText && (
@@ -4051,6 +4049,27 @@ function PinnedScheduleStrip({ midweekSchedules, publicTalkSchedules, meetings, 
             </span>
           )}
         </div>
+
+        {/* Field preview when there's no image on the schedule */}
+        {!schedule.fileUrl && (() => {
+          const previewFields = parseScheduleFieldsShared(schedule.content || "").slice(0, 3);
+          if (previewFields.length === 0) return null;
+          return (
+            <div className="space-y-1">
+              {previewFields.map((f, i) => {
+                const cfg = getFieldConfig(f.key, type === "midweek" ? "midweek" : "public-talk");
+                const Icon = cfg.icon;
+                return (
+                  <div key={i} className={`flex items-center gap-1.5 rounded-lg border ${cfg.border} ${cfg.bg} px-2 py-1 min-w-0`}>
+                    <Icon className={`h-3 w-3 ${cfg.text} shrink-0`} />
+                    <span className={`text-[10px] font-bold uppercase shrink-0 ${cfg.text}`}>{cfg.label || f.key}</span>
+                    <span className="text-[11px] font-medium truncate">{f.value}</span>
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })()}
 
         {/* Thumbnail / file link */}
         {schedule.fileUrl && (
