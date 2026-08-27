@@ -4054,13 +4054,15 @@ function PinnedScheduleStrip({ midweekSchedules, publicTalkSchedules, meetings, 
             for midweek only when there's no image on the schedule */}
         {(type === "public-talk" || !schedule.fileUrl) && (() => {
           const allFields = parseScheduleFieldsShared(schedule.content || "");
-          // Public talk: surface the basics (speaker, theme, congregation)
-          // regardless of stored order; midweek: first fields as stored
+          const hasValue = (v: string) => /[\p{L}\p{N}]/u.test(v);
+          // Public talk: always surface the basics (speaker, theme, congregation)
+          // — a "—" marks missing data; midweek: first fields as stored
           const previewFields = type === "public-talk"
-            ? ["Speaker", "TalkTheme", "Congregation"]
-                .map(k => allFields.find(f => f.key === k && f.value.trim()))
-                .filter((f): f is { key: string; value: string; num?: number } => !!f)
-            : allFields.filter(f => f.value.trim()).slice(0, 3);
+            ? ["Speaker", "TalkTheme", "Congregation"].map(k => {
+                const found = allFields.find(f => f.key === k && hasValue(f.value));
+                return found || { key: k, value: "—" };
+              })
+            : allFields.filter(f => hasValue(f.value)).slice(0, 3);
           if (previewFields.length === 0) return null;
           return (
             <div className="space-y-1">

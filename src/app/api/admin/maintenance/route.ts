@@ -16,7 +16,7 @@ export async function POST() {
   if (auth instanceof NextResponse) return auth;
 
   try {
-    const { normalized, deduped } = await migrateScheduleNotices();
+    const { normalized, deduped, datesFixed } = await migrateScheduleNotices();
 
     // Schedules with an image but no thumbnail — restore the thumbnail so the
     // board shows the schedule image again
@@ -46,10 +46,10 @@ export async function POST() {
     await logAction(auth, "update", "settings", {
       entityId: "maintenance",
       entityName: "Schedule cleanup",
-      details: { normalized, deduped, thumbnailsFixed },
+      details: { normalized, deduped, datesFixed, thumbnailsFixed },
     });
 
-    return NextResponse.json({ normalized, deduped, thumbnailsFixed });
+    return NextResponse.json({ normalized, deduped, datesFixed, thumbnailsFixed });
   } catch (error) {
     console.error("Maintenance run failed:", error);
     return NextResponse.json({ error: "Maintenance run failed" }, { status: 500 });

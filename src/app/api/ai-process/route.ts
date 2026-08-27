@@ -70,8 +70,9 @@ export async function POST(request: NextRequest) {
 
     const imgBase64 = imgBuffer.toString("base64");
 
-    // Call Gemini API (gemini-3.5-flash — current model, replaces deprecated gemini-2.0-flash).
-    // Retries transient errors (429 rate limit, 500/503 overload) with backoff.
+    // Call Gemini API. Primary model first, older models as fallback for
+    // outages/access issues. Retries transient errors (429/500/503) with backoff.
+    const MODELS = ["gemini-3.5-flash", "gemini-2.5-flash", "gemini-2.0-flash"];
     const geminiBody = JSON.stringify({
       contents: [{
         parts: [
@@ -87,29 +88,35 @@ export async function POST(request: NextRequest) {
 
     let geminiRes: Response | null = null;
     let lastErrText = "";
-    for (let attempt = 0; attempt < 3; attempt++) {
-      geminiRes = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${apiKey}`,
-        { method: "POST", headers: { "Content-Type": "application/json" }, body: geminiBody }
-      );
-      if (geminiRes.ok) break;
-      lastErrText = await geminiRes.text();
-      // Only retry transient failures — auth/config errors fail fast
-      if (![429, 500, 503].includes(geminiRes.status)) break;
-      if (attempt < 2) await new Promise(r => setTimeout(r, 1500 * (attempt + 1)));
+    let lastStatus = 0;
+    for (const model of MODELS) {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        geminiRes = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+          { method: "POST", headers: { "Content-Type": "application/json" }, body: geminiBody }
+        );
+        if (geminiRes.ok) break;
+        lastStatus = geminiRes.status;
+        lastErrText = await geminiRes.text();
+        // Only retry transient failures — auth/config errors try the next model
+        if (![429, 500, 503].includes(geminiRes.status)) break;
+        if (attempt < 1) await new Promise(r => setTimeout(r, 1500 * (attempt + 1)));
+      }
+      if (geminiRes && geminiRes.ok) break;
+      // Model unavailable (404/403) → try the next fallback model
+      if (geminiRes && [403, 404].includes(geminiRes.status)) continue;
+      break;
     }
 
-    if (geminiRes && !geminiRes.ok) {
+    if (!geminiRes || !geminiRes.ok) {
+      const status = geminiRes ? geminiRes.status : lastStatus || 502;
       console.error("Gemini API error:", lastErrText);
-      let geminiMsg = `AI processing failed (${geminiRes.status})`;
+      let geminiMsg = `AI processing failed (${status})`;
       try {
         const parsed = JSON.parse(lastErrText);
         if (parsed?.error?.message) geminiMsg = parsed.error.message;
       } catch {}
-      return NextResponse.json({ error: geminiMsg }, { status: geminiRes.status });
-    }
-    if (!geminiRes) {
-      return NextResponse.json({ error: "AI processing failed — no response" }, { status: 502 });
+      return NextResponse.json({ error: geminiMsg }, { status });
     }
 
     const geminiData = await geminiRes.json();

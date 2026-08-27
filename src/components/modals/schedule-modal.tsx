@@ -266,7 +266,7 @@ export function ScheduleModal({ open, onClose, onSaved, variant, categories, aiE
 
   // Only derive meetingEntries from manualText + selectedWeeks when NOT using AI entries
   useEffect(() => {
-    if (entriesFromAi) return; // AI entries manage themselves
+    if (entriesFromAi && mode === "ai") return; // AI entries manage themselves
     if (manualText && selectedWeeks.length > 0) {
       const lines = manualText.split("\n");
       const entries: MeetingEntry[] = [];
@@ -307,7 +307,7 @@ export function ScheduleModal({ open, onClose, onSaved, variant, categories, aiE
         }));
       }
     }
-  }, [manualText, selectedWeeks, meetingDay, entriesFromAi]);
+  }, [manualText, selectedWeeks, meetingDay, entriesFromAi, mode]);
 
   // Re-snap AI entry dates when meeting day changes
   useEffect(() => {
@@ -541,7 +541,7 @@ export function ScheduleModal({ open, onClose, onSaved, variant, categories, aiE
   };
 
   // The entries currently being displayed/edited
-  const displayEntries = entriesFromAi ? aiEntries : meetingEntries;
+  const displayEntries = mode === "ai" && entriesFromAi ? aiEntries : meetingEntries;
 
   // Detect missing weeks: between the earliest and latest known schedule dates
   // (existing + new), flag any week with no meeting scheduled
@@ -559,13 +559,17 @@ export function ScheduleModal({ open, onClose, onSaved, variant, categories, aiE
     return gaps;
   })();
 
+  // AI entries are used only in AI mode — switching to Manual Entry keeps them
+  // (so you can switch back) but saves the manual data
+  const useAiEntries = mode === "ai" && entriesFromAi && aiEntries.length > 0;
+
   const handleSave = async () => {
     // AI entries don't need a file upload; manual mode needs both file + weeks
-    if (entriesFromAi ? aiEntries.length === 0 : (!fileUrl || selectedWeeks.length === 0)) return;
+    if (useAiEntries ? aiEntries.length === 0 : (!fileUrl || selectedWeeks.length === 0)) return;
 
     // Build the pending payload (same shape executeSave will post)
     let pending: PendingScheduleSave;
-    if (entriesFromAi && aiEntries.length > 0) {
+    if (useAiEntries) {
       pending = {
         mode: "ai",
         entries: [...aiEntries].filter(e => e.date).sort((a, b) => a.date.localeCompare(b.date))
@@ -851,7 +855,7 @@ export function ScheduleModal({ open, onClose, onSaved, variant, categories, aiE
             </button>
             <button
               type="button"
-              onClick={() => { setMode("manual"); setEntriesFromAi(false); setAiEntries([]); }}
+              onClick={() => setMode("manual")}
               className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-semibold transition-colors ${mode === "manual" ? "bg-indigo-600 text-white" : "hover:bg-accent text-muted-foreground"}`}
             >
               <Type className="h-3.5 w-3.5" />
@@ -1210,7 +1214,7 @@ export function ScheduleModal({ open, onClose, onSaved, variant, categories, aiE
           <Button variant="outline" onClick={onClose} className="rounded-xl">Cancel</Button>
           <Button onClick={handleSave} disabled={!canSave || saving} className="bg-indigo-600 hover:bg-indigo-700 rounded-xl">
             {saving && <Loader2 className="h-4 w-4 animate-spin mr-1" />}
-            {editNotice ? "Save Changes" : `Upload & Post ${entriesFromAi && aiEntries.length > 1 ? `(${aiEntries.length} entries)` : selectedWeeks.length > 1 ? `(${selectedWeeks.length} weeks)` : ""}`}
+            {editNotice ? "Save Changes" : `Upload & Post ${useAiEntries && aiEntries.length > 1 ? `(${aiEntries.length} entries)` : selectedWeeks.length > 1 ? `(${selectedWeeks.length} weeks)` : ""}`}
           </Button>
         </div>
       </div>

@@ -1,6 +1,30 @@
 import { db } from "@/lib/db";
 import { parseScheduleFields, fieldsToContent, sortFieldsByNum } from "@/lib/schedule-field-config";
 
+const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+const DAY_RE = "(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\\w*,?\\s+";
+
+// Derive the event date(s) from the notice title:
+//   "… — Thu, Aug 27"        → start = end = Aug 27
+//   "… — Aug 31 – Sep 6"     → start = Aug 31, end = Sep 6
+function titleDates(title: string, year: number): { start: string; end: string } | null {
+  const m = title.match(new RegExp(`—\\s*(?:${DAY_RE})?([A-Za-z]{3,9})\\.?\\s+(\\d{1,2})(?:\\s*[–—-]\\s*(?:${DAY_RE})?([A-Za-z]{3,9})\\.?\\s+(\\d{1,2}))?\\s*$`));
+  if (!m) return null;
+  const monthIdx = (s: string) => MONTHS.indexOf(s.slice(0, 3).toLowerCase());
+  const mi1 = monthIdx(m[1]);
+  if (mi1 < 0) return null;
+  const ymd = (y: number, mi: number, d: number) => `${y}-${String(mi + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+  const start = ymd(year, mi1, parseInt(m[2], 10));
+  if (m[3] && m[4]) {
+    const mi2 = monthIdx(m[3]);
+    if (mi2 < 0) return null;
+    // Range crossing into next year (e.g. "Dec 29 – Jan 4")
+    const endYear = mi2 < mi1 ? year + 1 : year;
+    return { start, end: ymd(endYear, mi2, parseInt(m[4], 10)) };
+  }
+  return { start, end: start };
+}
+
 /**
  * One-time-per-database normalization of meeting schedule notices, run
  * automatically at server boot. Idempotent: notices already in the new format
@@ -11,13 +35,15 @@ import { parseScheduleFields, fieldsToContent, sortFieldsByNum } from "@/lib/sch
  *   - text duplicated into `description` ("Midweek meeting schedule for ...")
  *   - header lines and "#N" part numbers embedded inconsistently
  *   - exact-duplicate notices created before the conflict dialog existed
+ *   - stored event dates not matching the date in the title (wrong-week cards)
  *
  * New format:
  *   - fields live only in `content`, ordered/numbered ("#1 Key: Value")
  *   - `description` is null
+ *   - event dates match the title
  *   - at most one non-archived notice per exact title
  */
-export async function migrateScheduleNotices(): Promise<{ normalized: number; deduped: number }> {
+export async function migrateScheduleNotices(): Promise<{ normalized: number; deduped: number; datesFixed: number }> {
   const notices = await db.notice.findMany({
     where: {
       deletedAt: null,
@@ -27,10 +53,12 @@ export async function migrateScheduleNotices(): Promise<{ normalized: number; de
         { title: { startsWith: "Public Talk Schedule" } },
       ],
     },
-    select: { id: true, title: true, description: true, content: true, updatedAt: true },
+    select: { id: true, title: true, description: true, content: true, eventStartDate: true, eventEndDate: true, updatedAt: true },
   });
 
   let normalized = 0;
+  let datesFixed = 0;
+  const year = new Date().getFullYear();
 
   for (const n of notices) {
     // Prefer content; fall back to the old description blob
@@ -38,14 +66,25 @@ export async function migrateScheduleNotices(): Promise<{ normalized: number; de
     const fields = sortFieldsByNum(parseScheduleFields(raw));
     const cleanContent = fields.length > 0 ? fieldsToContent(fields) : (n.content || "");
 
-    const needsUpdate = (n.description !== null && n.description !== "") || cleanContent !== (n.content || "");
-    if (!needsUpdate) continue;
+    // Re-derive event dates from the title — a stored date that disagrees with
+    // the title makes the board card show the wrong week
+    const td = titleDates(n.title, year);
+    const storedStart = (n.eventStartDate || "").slice(0, 10);
+    const storedEnd = (n.eventEndDate || n.eventStartDate || "").slice(0, 10);
+    const dateMismatch = td && (td.start !== storedStart || td.end !== storedEnd);
+
+    const needsContentUpdate = (n.description !== null && n.description !== "") || cleanContent !== (n.content || "");
+    if (!needsContentUpdate && !dateMismatch) continue;
 
     await db.notice.update({
       where: { id: n.id },
-      data: { description: null, content: cleanContent },
+      data: {
+        ...(needsContentUpdate ? { description: null, content: cleanContent } : {}),
+        ...(dateMismatch && td ? { eventStartDate: td.start, eventEndDate: td.end } : {}),
+      },
     });
-    normalized++;
+    if (needsContentUpdate) normalized++;
+    if (dateMismatch) datesFixed++;
   }
 
   // Dedupe exact duplicates (same title = same schedule + date label): keep
@@ -68,10 +107,10 @@ export async function migrateScheduleNotices(): Promise<{ normalized: number; de
     }
   }
 
-  if (normalized > 0 || deduped > 0) {
-    console.log(`[schedule-migration] normalized ${normalized} notice(s), archived ${deduped} duplicate(s)`);
+  if (normalized > 0 || deduped > 0 || datesFixed > 0) {
+    console.log(`[schedule-migration] normalized ${normalized} notice(s), fixed ${datesFixed} date(s), archived ${deduped} duplicate(s)`);
   }
-  return { normalized, deduped };
+  return { normalized, deduped, datesFixed };
 }
 
 let migrated = false;

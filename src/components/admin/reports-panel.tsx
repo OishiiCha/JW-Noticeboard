@@ -38,7 +38,7 @@ export function ReportsPanel() {
   const [loading, setLoading] = useState(true);
   const [clashes, setClashes] = useState<{ name: string; week: string; assignments: Assignment[] }[]>([]);
   const [runningCleanup, setRunningCleanup] = useState(false);
-  const [cleanupResult, setCleanupResult] = useState<{ normalized: number; deduped: number; thumbnailsFixed: number } | null>(null);
+  const [cleanupResult, setCleanupResult] = useState<{ normalized: number; deduped: number; datesFixed: number; thumbnailsFixed: number } | null>(null);
 
   const runCleanup = async () => {
     setRunningCleanup(true);
@@ -54,7 +54,7 @@ export function ReportsPanel() {
       setCleanupResult(result);
       toast({
         title: "Cleanup complete",
-        description: `${result.normalized} normalized · ${result.deduped} duplicates archived · ${result.thumbnailsFixed} thumbnails restored`,
+        description: `${result.normalized} normalized · ${result.datesFixed} dates fixed · ${result.deduped} duplicates archived · ${result.thumbnailsFixed} thumbnails restored`,
       });
     } catch {
       toast({ title: "Cleanup failed", description: "Network error — please try again.", variant: "destructive" });
@@ -161,13 +161,13 @@ export function ReportsPanel() {
           </Button>
         </div>
         <p className="text-xs text-muted-foreground">
-          Normalizes old-format schedules (moves text out of descriptions, cleans headers, orders by part number), archives exact duplicates, and restores missing schedule images/thumbnails.
+          Normalizes old-format schedules (moves text out of descriptions, cleans headers, orders by part number), fixes stored dates that don't match the title, archives exact duplicates, and restores missing schedule images/thumbnails.
         </p>
         {cleanupResult && (
           <div className="flex items-center gap-2 rounded-lg border border-green-200 dark:border-green-800/40 bg-green-50 dark:bg-green-950/20 px-3 py-2">
             <CheckCircle2 className="h-4 w-4 text-green-600 shrink-0" />
             <p className="text-xs font-medium text-green-700 dark:text-green-300">
-              {cleanupResult.normalized} notice{cleanupResult.normalized === 1 ? "" : "s"} normalized · {cleanupResult.deduped} duplicate{cleanupResult.deduped === 1 ? "" : "s"} archived · {cleanupResult.thumbnailsFixed} thumbnail{cleanupResult.thumbnailsFixed === 1 ? "" : "s"} restored
+              {cleanupResult.normalized} notice{cleanupResult.normalized === 1 ? "" : "s"} normalized · {cleanupResult.datesFixed} date{cleanupResult.datesFixed === 1 ? "" : "s"} fixed · {cleanupResult.deduped} duplicate{cleanupResult.deduped === 1 ? "" : "s"} archived · {cleanupResult.thumbnailsFixed} thumbnail{cleanupResult.thumbnailsFixed === 1 ? "" : "s"} restored
             </p>
           </div>
         )}

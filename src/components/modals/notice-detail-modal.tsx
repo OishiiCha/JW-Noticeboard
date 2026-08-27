@@ -90,8 +90,10 @@ function detectVariant(content: string): ScheduleVariant {
 
 // Render schedule content as structured colored blocks with icons
 export function ScheduleFieldsDisplay({ content, variant = "midweek" }: { content: string; variant?: ScheduleVariant }) {
-  // Skip fields with no value — they'd render as empty "hidden" ghost rows
-  const fields = sortFieldsByNum(parseScheduleFields(content)).filter(f => f.value.trim());
+  // Skip fields whose value has no real visible characters (blank, dashes, or
+  // invisible/zero-width chars that survive trim) — they'd render as ghost rows
+  const hasVisible = (v: string) => /[\p{L}\p{N}]/u.test(v);
+  const fields = sortFieldsByNum(parseScheduleFields(content)).filter(f => hasVisible(f.value));
   if (fields.length === 0) return null;
   return (
     <div className="space-y-1.5">
