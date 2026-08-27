@@ -4050,8 +4050,9 @@ function PinnedScheduleStrip({ midweekSchedules, publicTalkSchedules, meetings, 
           )}
         </div>
 
-        {/* Field preview when there's no image on the schedule */}
-        {!schedule.fileUrl && (() => {
+        {/* Field preview — always for public talk (speaker/theme basics),
+            for midweek only when there's no image on the schedule */}
+        {(type === "public-talk" || !schedule.fileUrl) && (() => {
           const allFields = parseScheduleFieldsShared(schedule.content || "");
           // Public talk: surface the basics (speaker, theme, congregation)
           // regardless of stored order; midweek: first fields as stored

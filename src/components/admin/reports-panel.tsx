@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
-import { RefreshCw, ShieldCheck, AlertTriangle, CheckCircle2 } from "lucide-react";
+import { RefreshCw, ShieldCheck, AlertTriangle, CheckCircle2, Wrench } from "lucide-react";
 import { parseScheduleFields } from "@/lib/schedule-field-config";
 
 interface NoticeRow { id: string; title: string; content: string | null; eventStartDate: string | null; eventEndDate: string | null; }
@@ -37,6 +37,31 @@ export function ReportsPanel() {
   const { toast } = useToast();
   const [loading, setLoading] = useState(true);
   const [clashes, setClashes] = useState<{ name: string; week: string; assignments: Assignment[] }[]>([]);
+  const [runningCleanup, setRunningCleanup] = useState(false);
+  const [cleanupResult, setCleanupResult] = useState<{ normalized: number; deduped: number; thumbnailsFixed: number } | null>(null);
+
+  const runCleanup = async () => {
+    setRunningCleanup(true);
+    setCleanupResult(null);
+    try {
+      const res = await fetch("/api/admin/maintenance", { method: "POST" });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        toast({ title: "Cleanup failed", description: err.error || `HTTP ${res.status}`, variant: "destructive" });
+        return;
+      }
+      const result = await res.json();
+      setCleanupResult(result);
+      toast({
+        title: "Cleanup complete",
+        description: `${result.normalized} normalized · ${result.deduped} duplicates archived · ${result.thumbnailsFixed} thumbnails restored`,
+      });
+    } catch {
+      toast({ title: "Cleanup failed", description: "Network error — please try again.", variant: "destructive" });
+    } finally {
+      setRunningCleanup(false);
+    }
+  };
 
   const runCheck = async () => {
     setLoading(true);
@@ -122,6 +147,31 @@ export function ReportsPanel() {
       <p className="text-xs text-muted-foreground">
         Flags anyone assigned to more than one part in the same week — across the midweek schedule, public talk schedule, and weekly roles.
       </p>
+
+      {/* Schedule cleanup / repair */}
+      <div className="rounded-xl border border-border/40 bg-muted/10 p-4 space-y-2">
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <div className="flex items-center gap-2">
+            <Wrench className="h-4 w-4 text-muted-foreground" />
+            <h3 className="text-sm font-semibold">Fix & Clean Schedules</h3>
+          </div>
+          <Button size="sm" className="rounded-lg h-8 bg-indigo-600 hover:bg-indigo-700" onClick={runCleanup} disabled={runningCleanup}>
+            {runningCleanup ? <RefreshCw className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Wrench className="h-3.5 w-3.5 mr-1" />}
+            Run Cleanup
+          </Button>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Normalizes old-format schedules (moves text out of descriptions, cleans headers, orders by part number), archives exact duplicates, and restores missing schedule images/thumbnails.
+        </p>
+        {cleanupResult && (
+          <div className="flex items-center gap-2 rounded-lg border border-green-200 dark:border-green-800/40 bg-green-50 dark:bg-green-950/20 px-3 py-2">
+            <CheckCircle2 className="h-4 w-4 text-green-600 shrink-0" />
+            <p className="text-xs font-medium text-green-700 dark:text-green-300">
+              {cleanupResult.normalized} notice{cleanupResult.normalized === 1 ? "" : "s"} normalized · {cleanupResult.deduped} duplicate{cleanupResult.deduped === 1 ? "" : "s"} archived · {cleanupResult.thumbnailsFixed} thumbnail{cleanupResult.thumbnailsFixed === 1 ? "" : "s"} restored
+            </p>
+          </div>
+        )}
+      </div>
 
       {loading ? (
         <p className="text-xs text-muted-foreground py-6 text-center">Checking assignments…</p>
